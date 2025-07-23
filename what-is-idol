@@ -7,18 +7,18 @@ Idol is best described as a **communication contract language** for Hubris appli
 **Idol is a way to define, enforce, and simplify inter-task communication in a microkernel environment.**
 
 ```
-                BEFORE IDOL                   |                WITH IDOL
+                BEFORE IDOL                  |                WITH IDOL
                                              |
 +-------------+       Raw IPC       +------+ |  +-------------+     Type-Safe IPC    +------+
 | Client Task |<------------------>| Kernel| |  | Client Task |<------------------->| Kernel|
-+-------------+                    +------+ |  +-------------+                      +------+
-      |                               |     |        |                                 |
-  Must handle:                        |     |    Generated                            |
-  - Message formatting                |     |    code handles:                        |
-  - Error checking                    |     |    - Serialization                      |
-  - Type conversion                   |     |    - Error handling                     |
-  - Memory management                 |     |    - Type safety                        |
-                                      |     |                                         |
++-------------+                    +------+  |  +-------------+                      +------+
+      |                               |      |        |                                 |
+  Must handle:                        |      |    Generated                             |
+  - Message formatting                |      |    code handles:                         |
+  - Error checking                    |      |    - Serialization                       |
+  - Type conversion                   |      |    - Error handling                      |
+  - Memory management                 |      |    - Type safety                         |
+                                      |      |                                          |
 ```
 
 ## Explaining Idol to Different Audiences
