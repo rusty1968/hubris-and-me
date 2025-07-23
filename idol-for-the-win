@@ -1,0 +1,130 @@
+# How Idol Language Facilitates Hubris OS Application Development
+
+Idol, the interface definition language for Hubris, plays a critical role in creating robust applications for this microkernel-based operating system. Here's how it streamlines the development process:
+
+```
+                          HUBRIS APPLICATION
++------------------------------------------------------------------+
+|                                                                  |
+|   +------------------------+          +----------------------+    |
+|   |                        |          |                      |    |
+|   |   CLIENT TASK          |  SEND    |   SERVER TASK        |    |
+|   |   +-----------------+  |--------->|   +---------------+  |    |
+|   |   | Generated       |  |          |   | Generated     |  |    |
+|   |   | Client Stub     |  |          |   | Server Stub   |  |    |
+|   |   |                 |  |  REPLY   |   |               |  |    |
+|   |   | my_interface.   |<-|----------+   | dispatch()    |  |    |
+|   |   | operation(args) |  |          |   | trait impls   |  |    |
+|   |   +-----------------+  |          |   +---------------+  |    |
+|   |                        |          |                      |    |
+|   +------------------------+          +----------------------+    |
+|                                                                  |
+|                             ^                                    |
+|                             |                                    |
++------------------------------------------------------------------+
+                              |
+                  +-----------+-----------+
+                  |                       |
+                  |  my_interface.idol    |
+                  |  +-----------------+  |
+                  |  | Interface(      |  |
+                  |  |   name: "MyIf", |  |
+                  |  |   ops: {        |  |
+                  |  |     "op": (...) |  |
+                  |  |   }             |  |
+                  |  | )               |  |
+                  |  +-----------------+  |
+                  |                       |
+                  +-----------------------+
+```
+
+## Bridging the IPC Gap with Type Safety
+
+Hubris's architecture relies heavily on isolated tasks communicating through IPC (Inter-Process Communication). This creates a challenge: how do you maintain type safety and correct communication across separately compiled programs? Idol solves this by:
+
+1. **Providing a formal interface description** - Developers define interfaces in RON (Rusty Object Notation) files that specify operations, arguments, return types, and memory leases.
+
+2. **Generating type-safe code** - Idol automatically generates both client and server code that enforces the interface contract.
+
+## Simplifying Client Development
+
+For client tasks that need to call operations on server tasks, Idol:
+
+1. Generates wrapper types that encapsulate the complexity of IPC
+2. Handles serialization of arguments and deserialization of responses
+3. Makes remote procedure calls look and feel like regular function calls
+4. Enforces correct memory lease usage
+
+This allows developers to write code like:
+```rust
+let result = my_interface.operation(arg1, &buffer_to_read, &mut buffer_to_write)?;
+```
+instead of manually constructing messages, managing memory, and parsing responses.
+
+## Streamlining Server Implementation
+
+For server tasks, Idol:
+
+1. Generates trait definitions that servers must implement
+2. Handles message parsing and validation
+3. Provides the dispatch infrastructure to receive messages and route them to appropriate handlers
+4. Manages responses, including error handling
+
+This allows servers to focus on core functionality rather than IPC mechanics:
+```rust
+impl InOrderMyInterfaceImpl for MyServer {
+    fn operation(&mut self, arg1: u32, source: &[u8], sink: &mut [u8]) -> Result<(), MyError> {
+        // Implementation logic here
+    }
+}
+```
+
+## Enforcing Robust Error Handling
+
+Idol works in concert with Hubris's REPLY_FAULT mechanism to create exceptionally robust applications:
+
+```
+ CLIENT                          SERVER
++--------+                      +--------+
+|        |   Valid Message      |        |
+|        |--------------------->|        |
+|        |                      |        |
+|        |   Normal Response    |        |
+|        |<---------------------|        |
++--------+                      +--------+
+
++--------+                      +--------+
+|        |   Invalid Message    |        |
+|        |--------------------->|        |
+|        |                      |        |
+|  FAULT |   REPLY_FAULT        |        |
+|   X    |<---------------------|        |
++--------+                      +--------+
+```
+
+1. It validates message formats and operation codes
+2. For invalid messages, it can trigger REPLY_FAULT to terminate misbehaving clients
+3. For valid messages, it ensures proper type conversion and memory access
+
+This fail-fast approach catches errors early in development and helps prevent security vulnerabilities.
+
+## Supporting Advanced Patterns
+
+Idol accommodates sophisticated server designs:
+
+1. **Pipelined servers** - Processes multiple messages concurrently
+2. **Notification handling** - Responds to system notifications 
+3. **Closed RECV** - Listens only to specific clients
+4. **Type-safe enums and booleans** - Ensures proper marshaling of non-trivial types
+
+## Real-World Impact
+
+In practice, Idol significantly reduces the cognitive load and error surface when developing Hubris applications:
+
+1. **Reduced boilerplate** - Developers write less code overall
+2. **Fewer bugs** - Type checking catches errors at compile time
+3. **Better documentation** - Interfaces are explicitly defined
+4. **Simplified testing** - Clear interface boundaries make testing more straightforward
+
+By abstracting away the complexities of cross-task communication, Idol allows developers to treat Hubris's microkernel architecture more like a conventional system while still benefiting from the strong isolation and security properties that make Hubris unique.
+Relevant links:
