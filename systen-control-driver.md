@@ -408,36 +408,6 @@ fn system_init() {
 }
 ```
 
-## Design Patterns and Principles with Abstraction Layer
-
-### 1. Trait-Based Abstraction
-
-The new abstraction layer leverages Rust's trait system to provide a clear interface between hardware-specific implementation and generic driver code:
-
-```rust
-// Generic code that works with any system implementation
-fn configure_spi<T: ClockControl + ResetControl>(
-    sys: &mut T,
-    clock_id: &T::ClockId,
-    reset_id: &T::ResetId
-) -> Result<(), T::Error> 
-where 
-    T::Error: Error
-{
-    // Enable the clock
-    sys.enable(clock_id)?;
-    
-    // Reset the peripheral
-    sys.reset_assert(reset_id)?;
-    sys.reset_deassert(reset_id)?;
-    
-    Ok(())
-}
-```
-
-
-
-
 
 
 
