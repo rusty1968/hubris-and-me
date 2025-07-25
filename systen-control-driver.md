@@ -1,75 +1,6 @@
+# Hubris System Control Driver Development Guide 
 
-# Hubris System Driver Development Guide
-
-This document explains the critical role of system drivers in Hubris and provides guidance for implementing them in new microcontroller ports, incorporating the new abstraction layer.
-
-## What is the System Driver?
-
-The **system driver** is the foundational driver that provides essential chip-level services to all other drivers and application tasks. It serves as the "hardware abstraction coordinator" for the entire system, managing shared resources that multiple tasks need to access.
-
-In Hubris, the system driver is typically named `drv-{chipfamily}-sys` (e.g., `drv-stm32xx-sys`, `drv-ast1060-sys`) and runs as a high-priority server task that other drivers communicate with via IPC.
-
-## Core Responsibilities
-
-### 1. Clock and Reset Management
-
-The system driver controls peripheral power and reset states, which is fundamental since most microcontroller peripherals are powered down by default. This functionality is now abstracted through the `ClockControl` and `ResetControl` traits.
-
-**Key Operations:**
-- **`enable_clock(clock_id)`**: Powers on a specific peripheral by enabling its clock signal
-- **`disable_clock(clock_id)`**: Powers down a peripheral to save energy
-- **`reset_assert(reset_id)`**: Places a peripheral in reset state for initialization
-- **`reset_deassert(reset_id)`**: Releases a peripheral from reset, making it operational
-
-**Example Usage with Abstraction Layer:**
-
-```rust
-// SPI driver initialization sequence
-let sys = Sys::from(SYS.get_task_id());
-
-// Power on the SPI1 peripheral
-sys.enable_clock(&ClockId::Spi1)?;
-
-// Release from reset state
-sys.reset_deassert(&ResetId::Spi1)?;
-
-// SPI1 is now ready for configuration and use
-```
-
-### 2. GPIO Control and Configuration
-
-GPIO (General Purpose Input/Output) management is shared across many drivers for pin configuration, digital I/O, and alternate function assignment.
-
-**Key Operations:**
-- **`gpio_configure(port, pins, config)`**: Configure pin modes, pull resistors, drive strength, alternate functions
-- **`gpio_set_reset(port, set_mask, reset_mask)`**: Set and clear digital output pins atomically
-- **`gpio_read_input(port)`**: Read current state of input pins
-- **`gpio_toggle(port, pins)`**: Toggle output pin states
-
-**Configuration Types:**
-
-```rust
-// Pin configuration examples
-GpioConfig::Input(Pull::Up)           // Input with pull-up resistor
-GpioConfig::Output(OutputType::PushPull) // Push-pull output
-GpioConfig::AlternateFunction(5)      // Alternate function 5 (e.g., SPI)
-GpioConfig::Analog                    // Analog mode for ADC
-```
-
-### 3. Interrupt Multiplexing (EXTI)
-
-The system driver manages GPIO-based interrupts, routing hardware interrupt sources to specific tasks via the notification system.
-
-**Key Operations:**
-- **`gpio_irq_configure(mask, sensitivity)`**: Configure interrupt edge detection (rising/falling/both)
-- **`gpio_irq_control(mask, operation)`**: Enable, disable, or check interrupt status
-
-**Interrupt Flow:**
-1. Task configures GPIO pin as input
-2. Task configures interrupt sensitivity via sys driver
-3. Task enables interrupt and waits for notification
-4. Task handles interrupt and re-enables for next event
-
+This document explains the system control driver's role in Hubris and provides guidance for implementing clock and reset management in new microcontroller ports using standardized OpenProt traits.
 
 ## Architectural Role and Dependencies
 
@@ -91,168 +22,91 @@ The system driver manages GPIO-based interrupts, routing hardware interrupt sour
 └─────────────────────────┘
 ```
 
-**Every peripheral driver depends on the system driver** because:
-- Peripherals need clocks enabled before they can be accessed
-- Pin configuration is required for communication interfaces
-- Reset control is needed for reliable initialization
-- Shared GPIO resources must be coordinated
+## What is the System Control Driver?
 
-### Example: SPI Driver Dependency with Abstraction Layer
+The **system control driver** is the foundational driver that provides essential chip-level services to all other drivers and application tasks. It serves as the "hardware abstraction coordinator" for the entire system, managing shared resources that multiple tasks need to access.
 
-```rust
-// In SPI driver initialization
-impl SpiServer {
-    fn init() -> Result<Self, SpiError> {
-        let sys = Sys::from(SYS.get_task_id());
-        
-        // Enable SPI peripheral clock using abstraction
-        sys.enable_clock(&ClockId::Spi1)?;
-        
-        // Configure SPI pins with alternate functions
-        sys.gpio_configure(Port::A, pins![5, 6, 7], &[
-            GpioConfig::AlternateFunction(5), // SCK
-            GpioConfig::AlternateFunction(5), // MOSI  
-            GpioConfig::AlternateFunction(5), // MISO
-        ])?;
-        
-        // Release peripheral from reset using abstraction
-        sys.reset_deassert(&ResetId::Spi1)?;
-        
-        // Now SPI registers can be safely accessed
-        let spi = unsafe { &(*pac::SPI1::ptr()) };
-        // ... SPI configuration
-        
-        Ok(SpiServer { /* ... */ })
-    }
-}
-```
+In Hubris, the system control driver is typically named `drv-{chipfamily}-sys` (e.g., `drv-stm32xx-sys`, `drv-ast1060-sys`) and runs as a high-priority server task that other drivers communicate with via IPC.
 
-## Implementation Architecture with Abstraction Layer
+## Core Responsibilities
 
-### 1. Hardware Abstraction Layer
+### 1. Clock Management
 
-The new abstraction layer defines traits for common hardware operations that are implemented by platform-specific code:
+The system driver controls peripheral clock signals, which is fundamental since most microcontroller peripherals require active clock signals to operate. This functionality leverages standardized OpenProt traits implemented by external HAL crates.
+
+**Key Operations:**
+- **`enable_clock(clock_id)`**: Provides clock signal to a specific peripheral, making it operational
+- **`disable_clock(clock_id)`**: Stops clock signal to a peripheral, putting it in a non-operational state (saves power but peripheral retains state)
+- **`set_clock_frequency(clock_id, frequency_hz)`**: Configure peripheral clock frequency
+- **`get_clock_frequency(clock_id)`**: Query current peripheral clock frequency
+- **`configure_clock(clock_id, config)`**: Advanced clock configuration with custom parameters
+
+### 2. Reset Control
+
+Reset management ensures peripherals start in a known state and can be reliably reinitialized. This uses the OpenProt `ResetControl` trait implemented by HAL crates.
+
+**Key Operations:**
+- **`reset_assert(reset_id)`**: Places a peripheral in reset state for initialization
+- **`reset_deassert(reset_id)`**: Releases a peripheral from reset, making it operational
+- **`reset_pulse(reset_id, duration)`**: Performs a complete reset cycle with specified timing
+- **`reset_is_asserted(reset_id)`**: Query current reset state
+
+## OpenProt Standardized Traits
+
+The system control driver leverages standardized traits from the **OpenProt project** that provide a common interface for clock and reset control across all chip families. This allows the Hubris system driver code to be virtually identical regardless of the target hardware.
+
+### The OpenProt Traits
 
 ```rust
-// Implementation of abstraction traits for STM32 platform
-impl ClockControl for Stm32Sys {
-    type ClockId = Stm32Clock;
-    type ClockConfig = Stm32ClockConfig;
-    type Error = Stm32SysError;
-    
-    fn enable(&mut self, clock_id: &Self::ClockId) -> Result<(), Self::Error> {
-        match clock_id {
-            Stm32Clock::Spi1 => {
-                let rcc = unsafe { &(*pac::RCC::ptr()) };
-                rcc.apb2enr.modify(|_, w| w.spi1en().set_bit());
-                Ok(())
-            },
-            Stm32Clock::I2c1 => {
-                // Enable I2C1 clock
-                // ...
-                Ok(())
-            },
-            _ => Err(Stm32SysError::ClockNotFound),
-        }
-    }
-    
-    // Other method implementations...
+// From the OpenProt project
+use system_control_traits::{ClockControl, ResetControl, Error, ErrorKind};
+
+/// Common trait for clock control operations
+pub trait ClockControl: ErrorType {
+    type ClockId: Clone + PartialEq;
+    type ClockConfig: PartialEq;
+
+    fn enable(&mut self, clock_id: &Self::ClockId) -> Result<(), Self::Error>;
+    fn disable(&mut self, clock_id: &Self::ClockId) -> Result<(), Self::Error>;
+    fn set_frequency(&mut self, clock_id: &Self::ClockId, frequency_hz: u64) -> Result<(), Self::Error>;
+    fn get_frequency(&self, clock_id: &Self::ClockId) -> Result<u64, Self::Error>;
+    fn configure(&mut self, clock_id: &Self::ClockId, config: Self::ClockConfig) -> Result<(), Self::Error>;
+    fn get_config(&self, clock_id: &Self::ClockId) -> Result<Self::ClockConfig, Self::Error>;
 }
 
-impl ResetControl for Stm32Sys {
-    type ResetId = Stm32Reset;
-    type Error = Stm32SysError;
-    
-    fn reset_assert(&mut self, reset_id: &Self::ResetId) -> Result<(), Self::Error> {
-        // Implementation specific to STM32
-        // ...
-        Ok(())
-    }
-    
-    // Other method implementations...
-}
+/// Common trait for reset control operations  
+pub trait ResetControl: ErrorType {
+    type ResetId: Clone + PartialEq;
 
-// Error handling with standardized kinds
-impl Error for Stm32SysError {
-    fn kind(&self) -> ErrorKind {
-        match self {
-            Stm32SysError::ClockNotFound => ErrorKind::ClockNotFound,
-            Stm32SysError::ResetFailed => ErrorKind::HardwareFailure,
-            // Map other specific errors to standard kinds
-        }
-    }
+    fn reset_assert(&mut self, reset_id: &Self::ResetId) -> Result<(), Self::Error>;
+    fn reset_deassert(&mut self, reset_id: &Self::ResetId) -> Result<(), Self::Error>;
+    fn reset_pulse(&mut self, reset_id: &Self::ResetId, duration: Duration) -> Result<(), Self::Error>;
+    fn reset_is_asserted(&self, reset_id: &Self::ResetId) -> Result<bool, Self::Error>;
 }
 ```
 
-### 2. IPC Interface Definition
+### Benefits of OpenProt Standardization
 
-The system driver's API is defined using Hubris's Idol interface definition language, now exposing the abstraction layer's methods:
+**Identical Driver Code:**
+- System driver implementation is virtually the same across all chip families
+- Only the mapping layer and HAL instantiation differ between chips
+- Core clock/reset logic uses standard trait methods
 
-```idol
-// stm32xx-sys.idol
-Interface(
-    name: "Sys",
-    ops: {
-        "enable_clock
-        ```idol
-// stm32xx-sys.idol (continued)
-        "enable_clock": (
-            args: { "clock_id": "ClockId" },
-            reply: Result(ok: "()", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        "disable_clock": (
-            args: { "clock_id": "ClockId" },
-            reply: Result(ok: "()", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        "set_clock_frequency": (
-            args: { 
-                "clock_id": "ClockId",
-                "frequency_hz": "u64" 
-            },
-            reply: Result(ok: "()", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        "get_clock_frequency": (
-            args: { "clock_id": "ClockId" },
-            reply: Result(ok: "u64", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        "configure_clock": (
-            args: { 
-                "clock_id": "ClockId",
-                "config": "ClockConfig" 
-            },
-            reply: Result(ok: "()", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        "reset_assert": (
-            args: { "reset_id": "ResetId" },
-            reply: Result(ok: "()", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        "reset_deassert": (
-            args: { "reset_id": "ResetId" },
-            reply: Result(ok: "()", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        "reset_pulse": (
-            args: { 
-                "reset_id": "ResetId",
-                "duration_ms": "u32" 
-            },
-            reply: Result(ok: "()", err: CLike("SysError")),
-            idempotent: true,
-        ),
-        // ... other operations for GPIO, etc.
-    }
-)
-```
+**Vendor Ecosystem:**
+- Chip vendors implement OpenProt traits in their HAL crates
+- HAL crates can be shared across different RTOS/bare-metal projects  
+- Leverages existing Rust embedded ecosystem
 
-### 3. Server Implementation
+**Type Safety:**
+- Compile-time guarantees about clock/reset operations
+- Platform-specific identifiers prevent cross-chip confusion
+- Rich error handling with standardized error kinds
 
-The system driver runs as an IPC server task that implements the abstraction traits and processes requests from other drivers:
+## Implementation Architecture
+
+### 1. Unified System Driver Implementation
+
+With OpenProt traits, the system driver code becomes virtually identical across chip families:
 
 ```rust
 #![no_std]
@@ -260,154 +114,434 @@ The system driver runs as an IPC server task that implements the abstraction tra
 
 use idol_runtime::{RequestError, NotificationHandler};
 use userlib::*;
-use sys_abstractions::{ClockControl, ResetControl, Error, ErrorKind};
+use system_control_traits::{ClockControl, ResetControl, Error, ErrorKind};
+use sys_api::*;
+
+// Platform-specific HAL imports (conditional compilation)
+#[cfg(feature = "aspeed-ast2600")]
+use aspeed_rust::SystemController;
+#[cfg(feature = "aspeed-ast2600")]
+use aspeed_mapping::AspeedMapping;
+
+#[cfg(feature = "stm32f407")]
+use stm32f4xx_hal::SystemController;
+#[cfg(feature = "stm32f407")]  
+use stm32_mapping::Stm32Mapping;
+
+#[cfg(feature = "rp2040")]
+use rp2040_hal::SystemController;
+#[cfg(feature = "rp2040")]
+use rp_mapping::RpMapping;
 
 // Include generated server stub
 include!(concat!(env!("OUT_DIR"), "/server_stub.rs"));
 
-struct ServerImpl {
-    // Hardware-specific fields
-    rcc: &'static pac::rcc::RegisterBlock,
-    gpio_ports: [&'static pac::gpioa::RegisterBlock; 8],
-    // ... other hardware references
+// The core server implementation is IDENTICAL for all chip families
+struct SysServer {
+    controller: SystemController,  // Different type per chip, same trait interface
+    mapping: &'static dyn ClockResetMapping,
+    initialized: bool,
 }
 
-// Implementation of the abstraction traits
-impl ClockControl for ServerImpl {
-    type ClockId = ChipClock;
-    type ClockConfig = ChipClockConfig;
-    type Error = SysError;
-    
-    fn enable(&mut self, clock_id: &Self::ClockId) -> Result<(), Self::Error> {
-        // Implementation specific to the chip
-        match clock_id {
-            ChipClock::Spi1 => {
-                self.rcc.apb2enr.modify(|_, w| w.spi1en().set_bit());
-                Ok(())
-            },
-            // Handle other clocks...
-            _ => Err(SysError::ClockNotFound),
+impl SysServer {
+    fn new() -> Self {
+        // Only this instantiation differs between chips
+        #[cfg(feature = "aspeed-ast2600")]
+        let (controller, mapping) = (SystemController::new(), &AspeedMapping);
+        
+        #[cfg(feature = "stm32f407")]
+        let (controller, mapping) = (SystemController::new(), &Stm32Mapping);
+        
+        #[cfg(feature = "rp2040")]
+        let (controller, mapping) = (SystemController::new(), &RpMapping);
+        
+        Self {
+            controller,
+            mapping,
+            initialized: false,
         }
     }
     
-    // Implement other ClockControl methods...
-    fn disable(&mut self, clock_id: &Self::ClockId) -> Result<(), Self::Error> {
-        // Implementation
-    }
-    
-    fn set_frequency(&mut self, clock_id: &Self::ClockId, frequency_hz: u64) -> Result<(), Self::Error> {
-        // Implementation
-    }
-    
-    fn get_frequency(&self, clock_id: &Self::ClockId) -> Result<u64, Self::Error> {
-        // Implementation
-    }
-    
-    fn configure(&mut self, clock_id: &Self::ClockId, config: Self::ClockConfig) -> Result<(), Self::Error> {
-        // Implementation
-    }
-    
-    fn get_config(&self, clock_id: &Self::ClockId) -> Result<Self::ClockConfig, Self::Error> {
-        // Implementation
-    }
-}
-
-impl ResetControl for ServerImpl {
-    type ResetId = ChipReset;
-    type Error = SysError;
-    
-    fn reset_assert(&mut self, reset_id: &Self::ResetId) -> Result<(), Self::Error> {
-        // Implementation
-        match reset_id {
-            ChipReset::Spi1 => {
-                self.rcc.apb2rstr.modify(|_, w| w.spi1rst().set_bit());
-                Ok(())
-            },
-            // Handle other resets...
-            _ => Err(SysError::InvalidResetId),
+    // This init() method is IDENTICAL across all chip families
+    fn init(&mut self) -> Result<(), SysError> {
+        if self.initialized {
+            return Ok(());
         }
+        
+        // All chips use the same initialization sequence
+        self.configure_system_clocks()?;
+        self.enable_essential_clocks()?;
+        
+        self.initialized = true;
+        Ok(())
     }
     
-    // Implement other ResetControl methods...
-    fn reset_deassert(&mut self, reset_id: &Self::ResetId) -> Result<(), Self::Error> {
-        // Implementation
+    // IDENTICAL implementation - uses OpenProt trait methods
+    fn configure_system_clocks(&mut self) -> Result<(), SysError> {
+        // Get platform-specific configuration through mapping layer
+        let main_clock = self.mapping.get_main_system_clock_id();
+        let target_freq = self.mapping.get_optimal_system_frequency();
+        let main_config = self.mapping.get_main_clock_config();
+        
+        // Use standard trait methods - same for all chips!
+        self.controller.set_frequency(&main_clock, target_freq)
+            .map_err(|e| SysError::from_trait_error(e))?;
+            
+        self.controller.configure(&main_clock, main_config)
+            .map_err(|e| SysError::from_trait_error(e))?;
+            
+        Ok(())
     }
     
-    fn reset_pulse(&mut self, reset_id: &Self::ResetId, duration: Duration) -> Result<(), Self::Error> {
-        self.reset_assert(reset_id)?;
-        // Wait for specified duration
-        // Implementation-specific delay
-        self.reset_deassert(reset_id)
+    // IDENTICAL clock enable implementation across all chips
+    fn enable_clock_internal(&mut self, generic_clock_id: u32) -> Result<(), SysError> {
+        // Map generic ID to platform-specific type
+        let platform_clock_id = self.mapping.map_clock_id(generic_clock_id)
+            .ok_or(SysError::ClockNotFound)?;
+            
+        // Use standard OpenProt trait method - same for all chips!
+        self.controller.enable(&platform_clock_id)
+            .map_err(|e| SysError::from_trait_error(e))
     }
     
-    fn reset_is_asserted(&self, reset_id: &Self::ResetId) -> Result<bool, Self::Error> {
-        // Implementation
+    // IDENTICAL reset implementation across all chips
+    fn reset_assert_internal(&mut self, generic_reset_id: u32) -> Result<(), SysError> {
+        let platform_reset_id = self.mapping.map_reset_id(generic_reset_id)
+            .ok_or(SysError::InvalidResetId)?;
+            
+        // Use standard OpenProt trait method - same for all chips!
+        self.controller.reset_assert(&platform_reset_id)
+            .map_err(|e| SysError::from_trait_error(e))
+    }
+    
+    // All other methods are IDENTICAL - they all use the OpenProt traits!
+    fn set_frequency_internal(&mut self, generic_clock_id: u32, frequency_hz: u64) -> Result<(), SysError> {
+        let platform_clock_id = self.mapping.map_clock_id(generic_clock_id)
+            .ok_or(SysError::ClockNotFound)?;
+            
+        self.controller.set_frequency(&platform_clock_id, frequency_hz)
+            .map_err(|e| SysError::from_trait_error(e))
+    }
+    
+    fn reset_pulse_internal(&mut self, generic_reset_id: u32, duration_ms: u32) -> Result<(), SysError> {
+        let platform_reset_id = self.mapping.map_reset_id(generic_reset_id)
+            .ok_or(SysError::InvalidResetId)?;
+            
+        let duration = core::time::Duration::from_millis(duration_ms as u64);
+        self.controller.reset_pulse(&platform_reset_id, duration)
+            .map_err(|e| SysError::from_trait_error(e))
     }
 }
 
-// Implement Error trait for SysError
-impl Error for SysError {
-    fn kind(&self) -> ErrorKind {
-        match self {
-            SysError::ClockNotFound => ErrorKind::ClockNotFound,
-            SysError::InvalidResetId => ErrorKind::InvalidResetId,
-            SysError::ConfigurationFailed => ErrorKind::ClockConfigurationFailed,
-            // Map other specific errors...
-            _ => ErrorKind::HardwareFailure,
-        }
-    }
-}
-
-// Implement server IPC operations
-impl idl::InOrderSysImpl for ServerImpl {
+// The IPC implementation is also IDENTICAL across all chips
+impl idl::InOrderSysImpl for SysServer {
     fn enable_clock(
         &mut self,
         _msg: &RecvMessage,
-        clock_id: ChipClock,
+        clock_id: u32,
     ) -> Result<(), RequestError<SysError>> {
-        // Delegate to the ClockControl trait implementation
-        ClockControl::enable(self, &clock_id)
+        self.enable_clock_internal(clock_id)
             .map_err(RequestError::Runtime)
     }
     
     fn reset_assert(
         &mut self,
         _msg: &RecvMessage,
-        reset_id: ChipReset,
+        reset_id: u32,
     ) -> Result<(), RequestError<SysError>> {
-        // Delegate to the ResetControl trait implementation
-        ResetControl::reset_assert(self, &reset_id)
+        self.reset_assert_internal(reset_id)
             .map_err(RequestError::Runtime)
     }
     
-    // Implement other IPC operations...
+    fn set_clock_frequency(
+        &mut self,
+        _msg: &RecvMessage,
+        clock_id: u32,
+        frequency_hz: u64,
+    ) -> Result<(), RequestError<SysError>> {
+        self.set_frequency_internal(clock_id, frequency_hz)
+            .map_err(RequestError::Runtime)
+    }
+    
+    fn reset_pulse(
+        &mut self,
+        _msg: &RecvMessage,
+        reset_id: u32,
+        duration_ms: u32,
+    ) -> Result<(), RequestError<SysError>> {
+        self.reset_pulse_internal(reset_id, duration_ms)
+            .map_err(RequestError::Runtime)
+    }
+    
+    // ... all other IPC methods are identical too
 }
 
 #[no_mangle]
 fn main() -> ! {
-    let mut server = ServerImpl::new();
+    let mut server = SysServer::new();
     
-    // System initialization
-    system_init();
+    // Initialize using OpenProt traits - same for all chips
+    server.init().expect("System driver initialization failed");
     
-    // Main server loop
+    // Main server loop - identical for all chips
     loop {
         idol_runtime::dispatch(&mut server, INCOMING);
     }
 }
+```
 
-fn system_init() {
-    // Basic system clock configuration
-    configure_system_clock();
+### 2. Chip-Agnostic IPC Interface
+
+The IPC interface remains generic across all chip families:
+
+```idol
+// sys.idol - Generic interface for all chip families
+Interface(
+    name: "Sys",
+    ops: {
+        "enable_clock": (
+            args: { "clock_id": "u32" },
+            reply: Result(ok: "()", err: CLike("SysError")),
+            idempotent: true,
+        ),
+        "disable_clock": (
+            args: { "clock_id": "u32" },
+            reply: Result(ok: "()", err: CLike("SysError")),
+            idempotent: true,
+        ),
+        "set_clock_frequency": (
+            args: { 
+                "clock_id": "u32",
+                "frequency_hz": "u64" 
+            },
+            reply: Result(ok: "()", err: CLike("SysError")),
+            idempotent: true,
+        ),
+        "get_clock_frequency": (
+            args: { "clock_id": "u32" },
+            reply: Result(ok: "u64", err: CLike("SysError")),
+            idempotent: true,
+        ),
+        "reset_assert": (
+            args: { "reset_id": "u32" },
+            reply: Result(ok: "()", err: CLike("SysError")),
+            idempotent: true,
+        ),
+        "reset_deassert": (
+            args: { "reset_id": "u32" },
+            reply: Result(ok: "()", err: CLike("SysError")),
+            idempotent: true,
+        ),
+        "reset_pulse": (
+            args: { 
+                "reset_id": "u32",
+                "duration_ms": "u32" 
+            },
+            reply: Result(ok: "()", err: CLike("SysError")),
+            idempotent: true,
+        ),
+    }
+)
+```
+
+### 3. The Mapping Layer
+
+The mapping layer translates between generic Hubris constants and platform-specific HAL types:
+
+```rust
+// Common API constants - shared across all chip families
+pub mod sys_api {
+    // Standard peripheral categories
+    pub const CLOCK_GPIO_BASE: u32 = 0x0100_0000;
+    pub const CLOCK_SPI_BASE: u32 = 0x0200_0000;
+    pub const CLOCK_I2C_BASE: u32 = 0x0300_0000;
     
-    // Enable GPIO port clocks (usually needed for all GPIO operations)
-    enable_gpio_clocks();
+    pub const RESET_GPIO_BASE: u32 = 0x1100_0000;
+    pub const RESET_SPI_BASE: u32 = 0x1200_0000;
     
-    // Any other chip-specific initialization
-    configure_flash_wait_states();
+    // Common identifiers - same across all chips
+    pub const CLOCK_GPIOA: u32 = CLOCK_GPIO_BASE + 0;
+    pub const CLOCK_SPI1: u32 = CLOCK_SPI_BASE + 0;
+    pub const CLOCK_I2C1: u32 = CLOCK_I2C_BASE + 0;
+    
+    pub const RESET_GPIOA: u32 = RESET_GPIO_BASE + 0;
+    pub const RESET_SPI1: u32 = RESET_SPI_BASE + 0;
+    pub const RESET_I2C1: u32 = RESET_I2C_BASE + 0;
+}
+
+// Platform-specific mapping trait
+pub trait ClockResetMapping {
+    type ClockId: Clone + PartialEq;
+    type ResetId: Clone + PartialEq;
+    type ClockConfig: PartialEq;
+    
+    fn map_clock_id(&self, generic_id: u32) -> Option<Self::ClockId>;
+    fn map_reset_id(&self, generic_id: u32) -> Option<Self::ResetId>;
+    
+    // Platform-specific configuration helpers
+    fn get_main_system_clock_id(&self) -> Self::ClockId;
+    fn get_optimal_system_frequency(&self) -> u64;
+    fn get_main_clock_config(&self) -> Self::ClockConfig;
+    fn get_essential_clock_list(&self) -> &[Self::ClockId];
 }
 ```
 
+**ASPEED Mapping Implementation:**
+```rust
+// aspeed_mapping.rs
+use aspeed_rust::syscon::{ClockId as AspeedClockId, ResetId as AspeedResetId};
+use aspeed_rust::clocking::ClockConfig as AspeedClockConfig;
 
+pub struct AspeedMapping;
 
+impl ClockResetMapping for AspeedMapping {
+    type ClockId = AspeedClockId;
+    type ResetId = AspeedResetId;
+    type ClockConfig = AspeedClockConfig;
+    
+    fn map_clock_id(&self, generic_id: u32) -> Option<Self::ClockId> {
+        match generic_id {
+            CLOCK_GPIOA => Some(AspeedClockId::Gpio),      // ASPEED has unified GPIO clock
+            CLOCK_SPI1 => Some(AspeedClockId::Spi1),
+            CLOCK_I2C1 => Some(AspeedClockId::I2c1),
+            _ => None,
+        }
+    }
+    
+    fn map_reset_id(&self, generic_id: u32) -> Option<Self::ResetId> {
+        match generic_id {
+            RESET_GPIOA => Some(AspeedResetId::Gpio),
+            RESET_SPI1 => Some(AspeedResetId::Spi1),
+            RESET_I2C1 => Some(AspeedResetId::I2c1),
+            _ => None,
+        }
+    }
+    
+    fn get_main_system_clock_id(&self) -> Self::ClockId {
+        AspeedClockId::SystemClock
+    }
+    
+    fn get_optimal_system_frequency(&self) -> u64 {
+        800_000_000  // 800 MHz for AST2600
+    }
+    
+    fn get_main_clock_config(&self) -> Self::ClockConfig {
+        AspeedClockConfig {
+            source: aspeed_rust::clocking::ClockSource::Crystal25Mhz,
+            enable_spread_spectrum: false,
+        }
+    }
+    
+    fn get_essential_clock_list(&self) -> &[Self::ClockId] {
+        &[AspeedClockId::Gpio, AspeedClockId::Uart1, AspeedClockId::Wdt]
+    }
+}
+```
 
+**STM32 Mapping Implementation:**
+```rust
+// stm32_mapping.rs  
+use stm32f4xx_hal::rcc::{ClockId as Stm32ClockId, ResetId as Stm32ResetId};
+use stm32f4xx_hal::rcc::ClockConfig as Stm32ClockConfig;
+
+pub struct Stm32Mapping;
+
+impl ClockResetMapping for Stm32Mapping {
+    type ClockId = Stm32ClockId;
+    type ResetId = Stm32ResetId;
+    type ClockConfig = Stm32ClockConfig;
+    
+    fn map_clock_id(&self, generic_id: u32) -> Option<Self::ClockId> {
+        match generic_id {
+            CLOCK_GPIOA => Some(Stm32ClockId::GpioA),      // STM32 has separate GPIO clocks
+            CLOCK_SPI1 => Some(Stm32ClockId::Spi1),
+            CLOCK_I2C1 => Some(Stm32ClockId::I2c1),
+            _ => None,
+        }
+    }
+    
+    fn get_optimal_system_frequency(&self) -> u64 {
+        168_000_000  // 168 MHz for STM32F407
+    }
+    
+    fn get_main_clock_config(&self) -> Self::ClockConfig {
+        Stm32ClockConfig {
+            source: stm32f4xx_hal::rcc::ClockSource::Hse,
+            pll_m: 8,
+            pll_n: 336,
+            pll_p: 2,
+            pll_q: 7,
+        }
+    }
+    
+    // ... other implementations
+}
+```
+
+### 4. Multi-Platform Build Configuration
+
+```toml
+# Cargo.toml
+[dependencies]
+# OpenProt standardized traits
+system-control-traits = { git = "https://github.com/rusty1968/proposed_traits", branch = "caliptra-test" }
+
+# Chip-specific HAL crates (conditional)
+aspeed-rust = { git = "https://github.com/AspeedTech-BMC/aspeed-rust", optional = true }
+stm32f4xx-hal = { version = "0.14", optional = true, features = ["stm32f407"] }
+rp2040-hal = { version = "0.8", optional = true }
+
+# Common Hubris dependencies
+userlib = { path = "../../lib/userlib" }
+sys_api = { path = "../common/sys-api" }
+
+[features]
+default = []
+aspeed-ast2600 = ["aspeed-rust"]
+stm32f407 = ["stm32f4xx-hal"]
+rp2040 = ["rp2040-hal"]
+```
+
+## Client Usage
+
+Driver code remains portable across all chip families:
+
+```rust
+// SPI driver - identical for all chips
+use sys_api::*;
+
+impl SpiServer {
+    fn init() -> Result<Self, SpiError> {
+        let sys = Sys::from(SYS.get_task_id());
+        
+        // Uses generic constants - same code for all chips
+        sys.enable_clock(CLOCK_SPI1)?;
+        sys.set_clock_frequency(CLOCK_SPI1, 10_000_000)?; // 10MHz
+        sys.reset_deassert(RESET_SPI1)?;
+        
+        Ok(SpiServer::new())
+    }
+}
+```
+
+## Key Benefits of OpenProt Integration
+
+**Code Reuse:**
+- 99% of system driver code is identical across chip families
+- Only mapping layer and HAL instantiation differ
+- Dramatically reduces maintenance burden
+
+**Vendor Ecosystem:**
+- Chip vendors implement OpenProt traits in their HAL crates
+- Community can contribute to standardized interfaces
+- Easier to add new chip family support
+
+**Type Safety:**
+- Compile-time verification of clock/reset operations
+- Platform-specific types prevent cross-chip errors
+- Rich error handling with standardized error kinds
+
+**Testing:**
+- Common test suite can verify all chip implementations
+- Mock implementations for unit testing
+- Consistent behavior verification across platforms
