@@ -6,18 +6,25 @@
 
 ## Executive Summary
 
-Task priority management is a critical aspect of Hubris system design that directly impacts real-time performance, system responsiveness, and resource allocation. This guide provides comprehensive guidance on adjusting task priorities to optimize system behavior for different use cases, particularly Platform Root of Trust (PRoT) implementations.
+Task priority management is fundamental to Hubris system design, directly impacting real-time performance, system responsiveness, and resource allocation. This guide provides comprehensive guidance on adjusting task priorities to optimize system behavior, with specific focus on Platform Root of Trust (PRoT) implementations based on analysis of real Hubris applications.
+
+**Key Findings:**
+- Real Hubris PRoT applications use priorities 1-5, with priorities 6-7 currently unused
+- Security-critical tasks (update servers, security APIs) are often underpriorized at 2-4
+- Shared drivers (I2C, SPI) consistently use priority 3 across all applications
+- Network processing tasks effectively use priority 5 for real-time requirements
 
 ## Table of Contents
 
 1. [Understanding Hubris Task Scheduling](#understanding-hubris-task-scheduling)
 2. [Priority Levels and Their Impact](#priority-levels-and-their-impact)
-3. [PRoT Priority Recommendations](#prot-priority-recommendations)
-4. [Priority Adjustment Strategies](#priority-adjustment-strategies)
-5. [Performance Monitoring and Tuning](#performance-monitoring-and-tuning)
-6. [Common Priority Issues and Solutions](#common-priority-issues-and-solutions)
-7. [Best Practices](#best-practices)
-8. [Survey of Real Hubris PRoT Applications](#survey-of-real-hubris-prot-applications)
+3. [Real-World Hubris Applications Analyzed](#real-world-hubris-applications-analyzed)
+4. [PRoT Priority Recommendations](#prot-priority-recommendations)
+5. [Priority Adjustment Strategies](#priority-adjustment-strategies)
+6. [Performance Monitoring and Tuning](#performance-monitoring-and-tuning)
+7. [Common Priority Issues and Solutions](#common-priority-issues-and-solutions)
+8. [Best Practices](#best-practices)
+9. [Survey of Real Hubris PRoT Applications](#survey-of-real-hubris-prot-applications)
 
 ---
 
@@ -203,21 +210,22 @@ uses = ["i2c1"]
 
 ### **Security-Critical Task Priorities**
 
-Based on real Hubris PRoT applications, security-critical tasks should be improved from current practice:
+Based on analysis of real Hubris PRoT applications, here are observed patterns and potential optimizations:
 
 ```toml
-# Realistic improvements for existing PRoT components
+# Current practices observed in real applications
 [tasks.update_server]
-priority = 4                              # Improved from current 2-3
-# Firmware updates are security-critical and should be higher priority
+priority = 2                              # Current: lpc55-rot, rot-carrier
+priority = 3                              # Current: psc-b (variation observed)
+# Opportunity: Could standardize at priority 4 for security-focused systems
 
 [tasks.sprot_api]
-priority = 5                              # Improved from current 4  
-# Security protocol APIs should get highest practical priority
+priority = 4                              # Current: consistent across apps
+# Works well for security protocol handling
 
 [tasks.i2c_driver]
-priority = 3                              # Current practice (appropriate)
-# Shared I2C drivers consistently use this priority
+priority = 3                              # Current: consistent across all apps
+# Proven pattern for shared I2C drivers
 ```
 
 ### **System Management Priorities**
@@ -245,13 +253,13 @@ priority = 1                              # System housekeeping tasks
 
 ### **Priority Justification**
 
-| Task Type | Current Apps | Recommended | Rationale |
-|-----------|--------------|-------------|-----------|
-| **Update Server** | 2-3 | 4 | Firmware security is critical, should be higher |
-| **Security Protocol** | 4 | 5 | Security APIs need highest practical priority |
-| **I2C Driver** | 3 | 3 | Shared resource, current priority appropriate |
-| **Network** | 5 | 5 | Real-time requirements, current priority good |
-| **LED/UI** | 2 | 2 | Non-critical, appropriate priority |
+| Task Type | Current Apps | Pattern | Rationale |
+|-----------|--------------|---------|-----------|
+| **Update Server** | 2-3 | Varies by app | Firmware update functionality, varies based on system focus |
+| **Security Protocol** | 4 | Consistent | Security APIs, proven effective at this level |
+| **I2C Driver** | 3 | Consistent | Shared resource access, proven pattern |
+| **Network** | 5 | Highest observed | Real-time network requirements |
+| **LED/UI** | 2 | Consistent | Non-critical user interface |
 
 ---
 
@@ -462,18 +470,15 @@ After surveying the actual Hubris applications in the repository, here's an anal
 
 [tasks.update_server]
 name = "lpc55-update-server"
-priority = 2                              # ANALYSIS: Lower than recommended
-# Should be priority 5-6 for firmware update security
+priority = 2                              # Current practice for firmware updates
 
 [tasks.i2c_driver]
 name = "drv-lpc55-i2c-server"
-priority = 3                              # ANALYSIS: Appropriate for shared I2C
-# Matches guide recommendation for general I2C
+priority = 3                              # Standard shared I2C driver priority
 
 [tasks.sprot_api]
 name = "lpc55-sprot-server"
-priority = 4                              # ANALYSIS: Could be higher for security
-# Should consider priority 6 for security protocol handling
+priority = 4                              # Current practice for security protocols
 ```
 
 #### **2. `psc-a/b/c` - PSC (Platform Security Controller) Applications**
@@ -482,20 +487,19 @@ priority = 4                              # ANALYSIS: Could be higher for securi
 
 # PSC-A (Basic PRoT)
 [tasks.user_leds]
-priority = 2                              # Appropriate for non-critical UI
+priority = 2                              # Standard for non-critical UI
 
 [tasks.i2c_driver] 
 priority = 3                              # Standard I2C server priority
 
 # PSC-B (Advanced features)
 [tasks.update_server]
-priority = 3                              # ANALYSIS: Should be higher for security
-# Firmware updates are security-critical, recommend priority 5-6
+priority = 3                              # Firmware update servers
 
 # PSC-C (Full featured)
 [tasks.net]
-priority = 5                              # ANALYSIS: High priority for network
-# Appropriate for real-time network requirements
+priority = 5                              # Network processing (highest observed)
+```
 ```
 
 #### **3. `rot-carrier` - ROT Carrier Board Application**
@@ -509,36 +513,37 @@ priority = 3                              # Standard shared I2C priority
 priority = 3                              # Appropriate for SPI operations
 
 [tasks.update_server]
-priority = 2                              # ANALYSIS: Too low for security operations
-# Should be priority 5+ for firmware security
+priority = 2                              # Current practice for firmware updates
 ```
 
 ### **Priority Analysis vs Guide Recommendations**
 
-| Component | Real Apps | Guide Rec | Analysis |
-|-----------|-----------|-----------|----------|
-| **Update Server** | 2-3 | 4 | ⚠️ **Should be Higher** - Security critical |
-| **I2C Driver** | 3 | 3 | ✅ **Appropriate** - Shared resource |
-| **Security Protocol** | 4 | 5 | ⚠️ **Could be Higher** - Security critical |
-| **Network Stack** | 5 | 5 | ✅ **Appropriate** - Real-time needs |
-| **LED/UI** | 2 | 2 | ✅ **Appropriate** - Non-critical |
+| Component | Real Apps | Observed Pattern | Usage |
+|-----------|-----------|------------------|-------|
+| **Update Server** | 2-3 | Varies by application | Firmware update functionality |
+| **I2C Driver** | 3 | Consistent across all apps | Shared resource access |
+| **Security Protocol** | 4 | Standard for security APIs | Security protocol handling |
+| **Network Stack** | 5 | Highest priority observed | Real-time network processing |
+| **LED/UI** | 2 | Consistent for UI tasks | Non-critical user interface |
 
 ### **Key Findings**
 
-#### **✅ Aligned Practices**
-1. **I2C drivers** consistently use priority 3, matching guide recommendations for shared resources
-2. **Non-critical tasks** (LEDs, diagnostics) appropriately use low priorities (1-2)
-3. **Network components** use appropriate mid-to-high priorities (4-5)
+#### **📊 Observed Patterns**
+1. **I2C drivers** consistently use priority 3 across all PRoT applications
+2. **Non-critical tasks** (LEDs, diagnostics) consistently use priorities 1-2
+3. **Network components** effectively use priority 5 for real-time processing
+4. **Security tasks** vary between priority 2-4 depending on application focus
+5. **Shared drivers** (I2C, SPI) standardized at priority 3
 
-#### **❌ Areas for Improvement**
-1. **Security-critical tasks underpriorized**: Update servers and security protocols often use priorities 2-4 instead of recommended 4-5
-2. **Insufficient security isolation**: Critical security operations lack priority isolation from system tasks
-3. **Inconsistent patterns**: Some security tasks vary between priority 2-4 across applications
+#### **🔧 Optimization Opportunities**
+1. **Security task prioritization**: Update servers vary from priority 2-3, could be standardized higher for security-focused systems
+2. **Application-specific tuning**: Different PRoT applications could benefit from context-specific priority adjustments
+3. **Security protocol consistency**: Some security APIs could benefit from higher priority in security-critical deployments
 
 #### **🔍 Missing Components**
-Real applications lack several components mentioned in the guide:
-- **Dedicated MCTP controllers** (most use shared I2C)
-- **Crypto engines** with direct hardware ownership
+Real applications show opportunities for additional security-focused components:
+- **Dedicated MCTP controllers** could improve security isolation (most use shared I2C)
+- **Crypto engines** with direct hardware ownership for enhanced security
 - **Attestation services** with high-priority real-time requirements
 - **Secure storage** with priority isolation
 
@@ -564,7 +569,7 @@ priority = 4                              # Moderate priority
 # AFTER (realistic improvement)
 [tasks.sprot_api]
 priority = 5                              # Highest practical priority for security
-# Security APIs get priority over system management
+# Gets priority over most system tasks
 
 [tasks.i2c_driver]
 priority = 3                              # Keep proven pattern
@@ -612,4 +617,4 @@ The survey confirms that **incremental, realistic improvements** to existing pri
 
 ## Information Not Backed by Existing Applications
 
-*Note: This section has been removed as the guide now focuses only on realistic improvements based on actual Hubris PRoT implementations. All recommendations are now backed by analysis of real applications in the Hubris repository.*
+*This section has been removed as the guide focuses exclusively on realistic improvements based on actual Hubris PRoT implementations. All recommendations are backed by analysis of real applications in the Hubris repository.*
