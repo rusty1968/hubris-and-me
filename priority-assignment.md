@@ -611,10 +611,4 @@ Current PRoT applications appear to prioritize:
 2. **Phase 2**: Standardize on proven driver patterns (I2C/SPI → priority 3)
 3. **Phase 3**: Context-specific optimization (network vs security focus)
 
-The survey confirms that **incremental, realistic improvements** to existing priority assignments would significantly improve PRoT security while maintaining proven system stability.
 
----
-
-## Information Not Backed by Existing Applications
-
-*This section has been removed as the guide focuses exclusively on realistic improvements based on actual Hubris PRoT implementations. All recommendations are backed by analysis of real applications in the Hubris repository.*
