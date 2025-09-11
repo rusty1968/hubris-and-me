@@ -23,7 +23,7 @@ graph TB
     end
 
     subgraph "System API Layer"
-        SYSAPI[drv-stm32xx-sys-api<br/>• Direct Function Calls<br/>• GPIO Control Functions<br/>• Clock Control Functions<br/>• Power Management Functions<br/>• Hardware Abstraction]
+        SYSAPI[drv-stm32xx-sys-api<br/>• IPC Client Interface<br/>• GPIO Control Messages<br/>• Clock Control Messages<br/>• Power Management Messages<br/>• Hardware Abstraction]
     end
 
     subgraph "System Control Server Layer"
@@ -302,11 +302,11 @@ sequenceDiagram
 graph TB
     subgraph "Crate Organization"
         subgraph "API Crate"
-            SYSAPI_CRATE[drv-stm32xx-sys-api<br/>• System call wrappers<br/>• Hardware abstractions<br/>• Type definitions<br/>• Direct function calls<br/>• No IPC messages]
+            SYSAPI_CRATE[drv-stm32xx-sys-api<br/>• IPC client interface<br/>• System operation types<br/>• Message definitions<br/>• Hardware abstractions<br/>• Task-to-task communication]
         end
         
         subgraph "Server Crate"
-            SERVER_CRATE[sys-control-server<br/>• main() function<br/>• IPC handling<br/>• State management<br/>• Coordination logic<br/>• Policy enforcement]
+            SERVER_CRATE[sys-control-server<br/>• main function<br/>• IPC handling<br/>• State management<br/>• Coordination logic<br/>• Policy enforcement]
         end
         
         subgraph "Driver Crates"
@@ -479,7 +479,7 @@ sys.gpio_reset(scl_pin);
 
 Looking at the pattern `SYS.get_task_id()`, this proves:
 
-1. **SYS** is a **task slot** (like `I2C_SERVER`)
+1. **SYS** is a **task slot** for the system server
 2. **Sys::from(task_id)** creates an **IPC client** 
 3. **gpio_configure_alternate()** etc. are **IPC calls** wrapped as function calls
 
@@ -489,7 +489,7 @@ Looking at the pattern `SYS.get_task_id()`, this proves:
 graph TB
     subgraph "Actual Hubris System Architecture"
         subgraph "Application/Driver Tasks"
-            I2CSERVER[I2C Server Task]
+            SERVERAPP[Server Applications]
             OTHERDRV[Other Driver Tasks]
         end
         
@@ -506,7 +506,7 @@ graph TB
         end
     end
 
-    I2CSERVER --> SYSAPI_IMPL
+    SERVERAPP --> SYSAPI_IMPL
     OTHERDRV --> SYSAPI_IMPL
     SYSAPI_IMPL -.->|IPC Messages| SYSTASK
     SYSTASK --> STMHW
@@ -516,7 +516,7 @@ graph TB
     classDef apiLayer fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     classDef hwLayer fill:#fff3e0,stroke:#e65100,stroke-width:2px
 
-    class I2CSERVER,OTHERDRV taskLayer
+    class SERVERAPP,OTHERDRV taskLayer
     class SYSTASK systemTask
     class SYSAPI_IMPL apiLayer
     class STMHW hwLayer
@@ -559,21 +559,20 @@ impl Sys {
 
 ### **Key Pattern Recognition:**
 
-| Aspect | `drv-i2c-api` (Client-Server IPC) | `drv-stm32xx-sys-api` (System Service IPC) |
-|--------|----------------------------------|---------------------------------------------|
-| **Pattern** | `I2C_SERVER.get_task_id()` | `SYS.get_task_id()` |
-| **Client Creation** | Client for I2C operations | Client for system operations |
-| **Message Types** | I2C read/write requests | GPIO/clock/power requests |
-| **Server Task** | I2C server task | SYS server task |
-| **Purpose** | Peripheral communication | System resource management |
+| Aspect | System Service IPC Pattern |
+|--------|---------------------------|
+| **Pattern** | `SYS.get_task_id()` |
+| **Client Creation** | Client for system operations |
+| **Message Types** | GPIO/clock/power requests |
+| **Server Task** | SYS server task |
+| **Purpose** | System resource management |
 
-### **Both are IPC - Different Purposes:**
+### **IPC-Based System Access:**
 
-- **`drv-i2c-api`**: Application tasks → I2C server → Hardware peripherals
-- **`drv-stm32xx-sys-api`**: Driver tasks → SYS server → System hardware
+The `drv-stm32xx-sys-api` provides access to system hardware through a dedicated SYS server task, maintaining controlled hardware access through IPC messaging.
 
 ### **Conclusion:**
 
-The `drv-stm32xx-sys-api` is **also IPC**, just like `drv-i2c-api`. The key insight is that `SYS.get_task_id()` indicates there's a **system server task** that manages GPIO, clocks, and power - similar to how there's an I2C server task for I2C operations.
+The `drv-stm32xx-sys-api` uses **IPC messaging** to communicate with a system server task that manages GPIO, clocks, and power resources.
 
 This maintains Hubris's principle of **controlled hardware access** through dedicated server tasks rather than direct kernel system calls.
