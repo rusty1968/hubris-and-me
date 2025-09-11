@@ -251,4 +251,202 @@ i2c.write_read(Controller::I2C2, None, 0x50, &[reg], &mut buf)?;
 i2c.write_read(Controller::I2C2, Some((Mux::M1, Segment::S3)), 0x68, &[reg], &mut buf)?;
 ```
 
+# I²C Topology Tutorial
+
+## Chapter 1: The Simplest Topology
+
+Let's start with the absolute basics - one controller, one device:
+
+```
+MCU/SoC                           Device
+┌─────────┐                    ┌─────────┐
+│   I2C   │───SCL──────────────│ Sensor  │
+│ Master  │───SDA──────────────│ @0x68   │
+└─────────┘    │         │     └─────────┘
+               │         │
+              ┌┴┐       ┌┴┐
+              │ │ 4.7k  │ │ 4.7k
+              │ │       │ │
+              └┬┘       └┬┘
+               │         │
+              VDD       VDD
+```
+
+**Key points:**
+- Two wires: SCL (clock) and SDA (data)
+- Pull-up resistors required (both lines)
+- Device has fixed address (0x68)
+- Master initiates all communication
+
+## Chapter 2: Multiple Devices (Single Segment)
+
+Now let's add more devices to the same bus:
+
+```
+                     ┌──────────┐
+                     │ EEPROM   │
+                     │ @0x50    │
+                     └────┬─┬───┘
+                          │ │
+MCU               ┌───────┴─┴────┐      ┌──────────┐
+┌─────┐           │               │      │ Temp     │
+│ I2C ├──SCL──────┼───────────────┼──────┤ @0x48    │
+│     ├──SDA──────┼───────────────┼──────┤          │
+└─────┘           │               │      └──────────┘
+                  │               │
+              ┌───┴─┬───┐    ┌────┴─┬───┐
+              │ RTC │   │    │ ADC  │   │
+              │ @0x51   │    │ @0x49    │
+              └─────────┘    └──────────┘
+```
+
+**What works:**
+- Each device needs unique address
+- All devices see all traffic
+- Total capacitance < 400pF
+- Shared pull-ups (only one set!)
+
+**What breaks:**
+- Two devices with same address
+- Too many devices (capacitance)
+- Long traces (capacitance)
+
+## Chapter 3: The Address Conflict Problem
+
+You want two identical temperature sensors:
+
+```
+MCU
+┌─────┐         ┌─────────┐     ┌─────────┐
+│ I2C ├─────────┤ Temp #1 │     │ Temp #2 │
+│     │         │ @0x48   │     │ @0x48   │  ← CONFLICT!
+└─────┘         └─────────┘     └─────────┘
+```
+
+**This doesn't work!** Both devices respond to 0x48.
+
+## Chapter 4: Enter the Multiplexer
+
+A mux solves address conflicts by creating isolated segments:
+
+```
+                                 Segment 0
+                            ┌────┤ Temp #1 @0x48 │
+                            │    └───────────────┘
+MCU              MUX        │    Segment 1
+┌─────┐      ┌─────────┐    ├────┤ Temp #2 @0x48 │
+│ I2C ├──────┤ PCA9548 ├────┤    └───────────────┘
+│     │      │ @0x70   │    │    Segment 2
+└─────┘      └─────────┘    └────┤ Empty         │
+                                 └───────────────┘
+```
+
+**How to use it:**
+
+```rust
+// Step 1: Select mux channel 0
+i2c.write(0x70, &[0b00000001])?;  // Enable channel 0
+
+// Step 2: Talk to Temp #1
+let temp1 = i2c.read(0x48)?;
+
+// Step 3: Select mux channel 1  
+i2c.write(0x70, &[0b00000010])?;  // Enable channel 1
+
+// Step 4: Talk to Temp #2
+let temp2 = i2c.read(0x48)?;
+```
+
+## Chapter 5: Complex Topology
+
+Real systems combine everything:
+
+```
+I2C Controller 0
+│
+├─[Root Segment]
+│  ├─ EEPROM @0x50          (System config)
+│  ├─ RTC @0x51             (Time keeping)
+│  │
+│  ├─ MUX_A @0x70           (Sensor isolation)
+│  │  ├─[Ch0]─ Temp @0x48   (CPU0 temp)
+│  │  ├─[Ch1]─ Temp @0x48   (CPU1 temp)
+│  │  └─[Ch2]─ Temp @0x48   (Ambient)
+│  │
+│  └─ MUX_B @0x71           (Power monitoring)
+│     ├─[Ch0]─ INA219 @0x40 (12V rail)
+│     ├─[Ch1]─ INA219 @0x40 (5V rail)
+│     └─[Ch2]─ INA219 @0x40 (3.3V rail)
+│
+I2C Controller 1
+│
+└─[Root Segment]
+   ├─ MUX_C @0x72           (Hot-plug slots)
+   │  ├─[Ch0]─ [Empty/Unknown devices]
+   │  ├─[Ch1]─ [Empty/Unknown devices]
+   │  └─[Ch2]─ [Empty/Unknown devices]
+   │
+   └─ GPIO Expander @0x20   (Mux reset control)
+```
+
+## Chapter 6: Electrical Considerations
+
+### Capacitance Budget
+
+Each segment has a capacitance limit:
+
+```
+Device capacitance:     ~10pF each
+PCB trace capacitance:  ~2pF/cm
+Cable capacitance:      ~50-100pF/m
+
+Standard mode (100kHz): 400pF max
+Fast mode (400kHz):     400pF max  
+Fast mode+ (1MHz):      550pF max
+```
+
+### Pull-up Calculation
+
+```
+Minimum (strongest): VDD / 3mA
+Maximum (weakest):   Rise time / (0.8473 × C)
+
+Example for 3.3V, 400pF bus:
+- Minimum: 3.3V / 3mA = 1.1kΩ
+- Maximum: 1000ns / (0.8473 × 400pF) = 2.95kΩ
+- Typical choice: 2.2kΩ
+```
+
+### Segment Isolation
+
+Why muxes provide isolation:
+
+```
+Without Mux:                  With Mux:
+Total C = C1+C2+C3+C4        Total C = C_root + C_active_segment
+
+     400pF                         100pF      100pF
+  (all devices)                  (root)    (segment)
+```
+
+## Chapter 7: Software Patterns
+
+### Basic Mux Control
+
+```rust
+struct MuxI2C {
+    bus: I2cBus,
+    mux_addr: u8,
+}
+
+impl MuxI2C {
+    fn select_channel(&mut self, ch: u8) -> Result<()> {
+        // PCA9548: bit position = channel
+        self.bus.write(self.mux_addr, &[1 << ch])
+    }
+    
+    fn read_device(&mut self, ch: u8, addr: u8) -> Result<u8> {
+        self.select_channel(ch)?;
+        self.bus.read(
+
 This is a pragmatic model that covers most server/embedded topologies while avoiding the complexity of arbitrary tree structures.
