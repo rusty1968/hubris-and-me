@@ -31,6 +31,65 @@ Physical I²C peripheral in the SoC/MCU (e.g., I2C0, I2C1). Independent hardware
 **Port**  
 Alternative pin mapping for a controller. Some controllers can use different GPIO pins (e.g., I2C2 on PA8/PA9 or PB10/PB11).
 
+The "port" concept in I2C topology is not standard and may cause confusion. We shall clarify what's typically seen in real hardware:
+
+```text
+Typical MCU 
+├── I2C0 Controller → One set of pins (SCL0/SDA0)
+├── I2C1 Controller → One set of pins (SCL1/SDA1)  
+├── I2C2 Controller → One set of pins (SCL2/SDA2)
+└── I2C3 Controller → One set of pins (SCL3/SDA3)
+```
+
+Each I2C controller typically has:
+
+- One physical bus (one SCL/SDA pin pair)
+- One clock generator
+- One set of control registers
+
+When "Ports" Might Exist
+
+The "port" concept might apply in these specialized cases:
+
+1. Pin Multiplexing (Alternative Functions)
+
+```text
+I2C0 Controller:
+├── Port 0 → Pins PA9/PA10 (Alternative Function 1)
+└── Port 1 → Pins PB6/PB7 (Alternative Function 2)
+```
+Same controller, different physical pins through GPIO alternate functions.
+
+2. Multi-Channel I2C Controllers (Rare)
+
+```text
+Specialized I2C Controller:
+├── Channel 0 → SCL0/SDA0 pins
+├── Channel 1 → SCL1/SDA1 pins  
+└── Channel 2 → SCL2/SDA2 pins
+```
+One controller block managing multiple independent buses.
+
+3. System-on-Chip with I2C Fabric
+
+```text   
+Complex SoC:
+├── I2C_FABRIC Controller
+│   ├── Port 0 → CPU subsystem bus
+│   ├── Port 1 → PCIe subsystem bus
+│   └── Port 2 → External connector bus
+```
+
+Typical Real-World Scenario
+For most embedded systems -> Each controller = One bus = One port
+
+```text
+AST1060 MCU:
+├── I2C0 → Direct to external pins
+├── I2C1 → Direct to external pins
+├── I2C2 → Direct to external pins
+└── I2C3 → Direct to external pins
+```
 **Segment**  
 Electrically continuous portion of I²C bus. All devices on a segment see all traffic. Limited by capacitance (~400pF).
 
