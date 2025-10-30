@@ -117,3 +117,12 @@ pub fn usermode_entry_point() -> u32;
 pub fn get_task_dump_area() -> &'static mut [u8];
 ```
 
+### ✅ What Makes Hubris Easy to Port
+
+1. **🎯 Narrow target scope**: Only 32-bit microcontrollers
+2. **📦 Rust ecosystem**: RISC-V already well-supported
+3. **🔒 Memory safety**: Rust prevents most porting bugs
+4. **⚡ Simple execution model**: Privileged kernel, unprivileged tasks
+5. **🛡️ Minimal assembly**: Most code is portable Rust
+6. **📚 Clear documentation**: Architecture requirements already specified
+
