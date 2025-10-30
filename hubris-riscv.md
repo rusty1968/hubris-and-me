@@ -7,7 +7,7 @@ Porting Hubris OS to RISC-V would be **trivial** compared to porting most operat
 ### Minimal Kernel Surface Area
 Hubris follows a **microkernel philosophy** where the kernel does as little as possible:
 
-- **Small syscall set**: Only 14 syscalls total (vs hundreds in Linux)
+- **Small syscall set**: Only 14 syscalls total.
 - **Preemptive scheduling**: Simple priority-based scheduler.
 - **Statically allocated**: All resources determined at compile time
 - **Task isolation**: Memory protection via region-based MPU/PMP, not page tables
