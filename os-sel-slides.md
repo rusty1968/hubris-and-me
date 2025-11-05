@@ -233,15 +233,15 @@ Restart Task (10ms)
 System Continues
 ```
 
-**Traditional Approach:**
+**Tock Design (Capsule Hang):**
 ```
-Kernel Component Hangs
+Kernel Capsule Hangs
     ↓
-System Blocked
+Kernel Blocked
     ↓
-Manual Intervention Required
+System Watchdog Timeout
     ↓
-System Restart (seconds/minutes)
+Full System Restart (seconds)
 ```
 
 **Winner: Hubris** — Untrusted tasks enable true fault tolerance
