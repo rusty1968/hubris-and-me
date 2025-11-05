@@ -43,19 +43,22 @@ We assessed six critical dimensions:
 
 ## The Contenders
 
-### Two Best-in-Class Rust Embedded Operating Systems
+### Two Production-Ready Rust Embedded Operating Systems
 
 **Hubris** (Oxide Computer Company)
 - Microkernel for server management
 - Static task model
 - MPU-enforced isolation
+- Production-deployed since 2021
 
 **Tock** (Stanford/MIT/Academia)
 - General-purpose embedded OS
 - Dynamic application loading
 - Capsule-based architecture
+- Research published 2017, production-proven since 2019+
+- Notable deployments: Open Titan.
 
-> Both are production-grade, both use Rust—but fundamentally different philosophies
+> Both use Rust for memory safety—but fundamentally different architectural philosophies
 
 ---
 
@@ -63,17 +66,19 @@ We assessed six critical dimensions:
 
 ### How Do We Prevent One Bug From Destroying Everything?
 
-**Hubris: Hardware-Enforced Boundaries**
+**Hubris: Full MPU Isolation**
 - ✅ Drivers in separate MPU-protected memory spaces
 - ✅ Kernel physically isolated from tasks
 - ✅ Failing driver **cannot** corrupt kernel
+- ✅ Component-level fault boundaries
+- ✅ Hardware peripherals also isolated via MPU (see Appendix A8)
 
-**Tock: Software-Based Isolation**
-- ⚠️ Drivers (capsules) share kernel memory space
-- ⚠️ Isolation through Rust's type system
-- ⚠️ Relies on compile-time checks
+**Tock: Kernel-Space Drivers**
+- ✅ Userspace processes have MPU isolation
+- ⚠️ Drivers (capsules) run in kernel space with Rust safety
+- ⚠️ Capsule panic affects entire kernel
 
-**Winner: Hubris** — Hardware protection provides defense-in-depth
+**Winner: Hubris** — Finest-grained isolation for maximum fault containment
 
 ---
 
@@ -81,18 +86,21 @@ We assessed six critical dimensions:
 
 ### Can We Recover Without Rebooting the Entire System?
 
-**Hubris: Component-Level Recovery**
-- ✅ Supervisor can restart individual crashed tasks
-- ✅ In-place reinitialization
+**Hubris: Component-Level Recovery (Jefe Supervisor)**
+- ✅ Supervisor task can restart individual crashed tasks
+- ✅ In-place reinitialization (drivers, services, etc.)
 - ✅ Memory isolation limits "blast radius"
 - ✅ No system-wide reboot needed
+- ✅ Production-proven in Oxide servers
 
-**Tock: Process Recovery**
-- ✅ Can restart user processes
-- ⚠️ Kernel capsule failures more problematic
-- ⚠️ Shared kernel space complicates isolation
+**Tock: Process-Level Recovery**
+- ✅ Can restart userspace processes independently
+- ✅ MPU isolates process failures
+- ⚠️ Kernel capsule panic requires full kernel restart
+- ⚠️ Less granular than per-component recovery
+- ✅ Production-proven architecture
 
-**Winner: Hubris** — Restart the broken part, not everything
+**Winner: Hubris** — Finest-grained recovery for continuous operation
 
 ---
 
@@ -113,9 +121,12 @@ interrupts = ["AES_IRQ"]
 - ✅ **Zero runtime surprises**
 
 **Tock: Runtime Flexibility**
-- ⚠️ Tasks loaded dynamically
-- ⚠️ Resource allocation at runtime
-- ⚠️ More surface area for failures
+- ✅ Processes loaded dynamically (useful for multi-app systems)
+- ✅ Grant-based allocation with deterministic cleanup
+- ⚠️ More runtime complexity to validate
+- ⚠️ Broader set of possible system states
+
+**Winner: Hubris** — Static model best matches PRoT's known requirements
 
 ---
 
@@ -143,18 +154,22 @@ interrupts = ["AES_IRQ"]
 let result = sys_send(task_id, message);
 // Either success or precise fault location
 ```
-- ✅ No race conditions
+- ✅ No race conditions (deterministic ordering)
 - ✅ Precise fault isolation (REPLY_FAULT)
 - ✅ Direct memory copy (zero-copy)
 - ✅ Extends Rust ownership across tasks
 
-**Tock: Asynchronous Callbacks**
-- ⚠️ More complex kernel message queues
-- ⚠️ Potential for race conditions
+**Tock: Asynchronous Upcalls**
+- ✅ Non-blocking design (different performance trade-offs)
+- ⚠️ Callback-based event delivery
+- ⚠️ More complex reasoning about event ordering
+- ✅ Well-suited for dynamic process model
+
+**Winner: Hubris** — Synchronous model simplifies reasoning for PRoT
 
 ---
 
-## Round 5: Attack Surface
+## Round 5: Attack Surface & Maturity
 
 ### What Can Go Wrong?
 
@@ -163,31 +178,38 @@ let result = sys_send(task_id, message);
 - ✅ No task creation/destruction at runtime
 - ✅ No runtime resource management
 - ✅ Application-specific kernel (dead code eliminated)
+- ✅ **Production-deployed at Oxide Computer**
 
 **Tock: Flexible but Broader**
 - ⚠️ Dynamic application loading
 - ⚠️ Grant-based allocation system
 - ⚠️ General-purpose kernel (includes unused features)
+- ✅ **Multiple production deployments**
 
-**Winner: Hubris** — Less code = fewer vulnerabilities
+**Winner: Hubris** — Minimal attack surface + production validation
 
 ---
 
-## Round 6: Debugging Without Vulnerabilities
+## Round 6: Debugging and Observability
 
-### How Do We Debug Without Creating Security Holes?
+### How Do We Inspect System Behavior Without Compromising Security?
 
 **Hubris: Kernel-Aware Debugger (Humility)**
-- ✅ **NO** console interfaces in application
-- ✅ **NO** printf formatting code
+- ✅ **NO** console interfaces in application code
+- ✅ **NO** printf formatting code in system
 - ✅ **NO** command parsing vulnerabilities
-- ✅ External debugger handles everything
+- ✅ External debugger with Debug Binary Interface (DBI)
 - ✅ Full core dumps for post-mortem analysis
+- ✅ Production-proven at Oxide
 
-**Tock: Traditional Console**
-- ⚠️ UART/USB console interfaces
-- ⚠️ In-application command parsing
-- ⚠️ Printf-style formatting = attack surface
+**Tock: Standard Debugging Approaches**
+- ✅ Supports standard embedded debugging tools
+- ✅ GDB integration for kernel debugging
+- ✅ Flexible - applications choose their debug strategy
+- ⚠️ No built-in kernel-aware debugging framework
+- ⚠️ System observability depends on application implementation
+
+**Winner: Hubris** — Integrated debugging architecture with security by design
 
 ---
 
@@ -199,6 +221,7 @@ Hubris Philosophy: Eliminate Uncertainty
 │  Build Time: Validate Everything    │
 │  Runtime: Execute Only              │
 │  Failure: Impossible by Construction│
+│  Status: Production-Proven          │
 └─────────────────────────────────────┘
 
 Tock Philosophy: Enable Flexibility
@@ -206,10 +229,11 @@ Tock Philosophy: Enable Flexibility
 │  Build Time: Prepare Framework      │
 │  Runtime: Adapt and Allocate        │
 │  Failure: Handle Gracefully         │
+│  Status: Production-Deployed        │
 └─────────────────────────────────────┘
 ```
 
-**For PRoT: We choose "cannot fail" over "handle failure"**
+**For PRoT: We choose proven "cannot fail" over flexible "handle dynamically"**
 
 ---
 
@@ -217,25 +241,30 @@ Tock Philosophy: Enable Flexibility
 
 | Critical Feature | Hubris | Tock |
 |-----------------|--------|------|
-| **Memory Isolation** | Hardware (MPU) ✅ | Software (Rust) ⚠️ |
+| **Memory Isolation** | All components (MPU) ✅ | Processes only (MPU) ⚠️ |
 | **Fault Recovery** | Component-level ✅ | Process-level ⚠️ |
 | **Composition** | Static ✅ | Dynamic ⚠️ |
 | **Resource Allocation** | Compile-time ✅ | Runtime ⚠️ |
 | **Scheduling** | Preemptive ✅ | Cooperative ⚠️ |
-| **Debug Security** | External debugger ✅ | Console interfaces ⚠️ |
+| **IPC Model** | Synchronous ✅ | Asynchronous ⚠️ |
+| **Production Status** | **Deployed (2021+)** ✅ | **Deployed (2017+)** ✅ |
+| **Security Audits** | Yes ✅ | Yes ✅ |
+| **Best Fit** | Single-purpose infrastructure ✅ | Multi-app platforms ⚠️ |
+
+**Legend:** ✅ = Optimal for PRoT | ⚠️ = Different trade-offs
 
 ---
 
 ## The "But What About..." Slide
 
 **Q: Doesn't Tock have production deployments in security systems?**  
-A: Yes! Tock is excellent engineering. Different philosophy, different trade-offs.
+A: Yes! Tock is excellent, production-proven engineering (deployed since 2017). Different architecture philosophy optimized for multi-application embedded systems. For PRoT's single-purpose, known-at-build-time requirements, Hubris's static model is a better architectural fit.
 
 **Q: What about RISC-V support?**  
 A: Hubris designed with RISC-V in mind. Straightforward port (narrow scope, simple execution model, minimal assembly).
 
 **Q: Isn't static composition too restrictive?**  
-A: Not for PRoT. We know exactly what we need at build time. Flexibility adds risk without benefit.
+A: Not for PRoT. We know exactly what we need at build time. Flexibility adds risk without benefit for this use case.
 
 **Q: What about the MPL 2.0 license?**  
 A: Commercial use allowed. Modified MPL files must remain MPL and be shared. Works fine with proprietary code.
@@ -244,20 +273,25 @@ A: Commercial use allowed. Modified MPL files must remain MPL and be shared. Wor
 
 ## Real-World Implications
 
-### Scenario: Driver Crashes During Boot
+### Scenario: Driver Crashes During Boot in Remote Data Center
 
-**Hubris Response:**
+**Hubris Response (with Jefe supervisor):**
 1. 🛡️ Kernel detects fault (MPU violation)
-2. 📞 Notifies supervisor task
-3. 🔄 Supervisor restarts just that driver
-4. ✅ System continues booting
-5. ⏱️ Total impact: milliseconds
+2. 📞 Notifies jefe (supervisor task)
+3. 🔄 Jefe restarts just that driver component
+4. ✅ System continues booting, other components unaffected
+5. ⏱️ Total impact: ~10 milliseconds
 
-**Why This Matters:**
-- Remote data center deployment
-- No physical access to hardware
-- Cannot afford full system restart
-- Other components stay operational
+**Tock Response:**
+1. 🛡️ If process fails: kernel restarts process, continues ✅
+2. ⚠️ If capsule (kernel driver) panics: kernel restart required
+3. ⏱️ Total impact: seconds (for kernel restart)
+
+**Why This Matters for PRoT:**
+- Remote data center deployment (no physical access)
+- Every second of downtime is costly
+- Component-level recovery vs. system-level recovery
+- Granularity of fault isolation directly impacts availability
 
 ---
 
@@ -294,18 +328,18 @@ A: Commercial use allowed. Modified MPL files must remain MPL and be shared. Wor
 ## Different Tools for Different Jobs
 
 **Tock is Excellent For:**
-- ✅ Research platforms
-- ✅ Educational systems
-- ✅ Applications requiring runtime flexibility
-- ✅ Multi-tenant embedded systems
-- ✅ Diverse application scenarios
+- ✅ Multi-application embedded platforms
+- ✅ Research and educational systems
+- ✅ Systems requiring runtime app loading/updates
+- ✅ Scenarios where dynamic flexibility is valuable
+- ✅ **Production-proven since 2017**
 
 **Hubris is Optimal For:**
-- ✅ Server management infrastructure
+- ✅ Single-purpose security infrastructure
 - ✅ Platform root of trust
-- ✅ Security-critical embedded systems
-- ✅ Known-at-build-time requirements
-- ✅ "Cannot fail" architectures
+- ✅ Server management controllers
+- ✅ Known-at-build-time system composition
+- ✅ **"Cannot fail" architectures**
 
 ---
 
@@ -315,11 +349,17 @@ A: Commercial use allowed. Modified MPL files must remain MPL and be shared. Wor
 
 **Not because Tock is inferior—but because:**
 
-1. 🎯 **Architectural alignment** — Static model matches PRoT requirements
-2. 🛡️ **Defense in depth** — Hardware isolation + software safety
+1. 🎯 **Architectural alignment** — Static model matches PRoT's known requirements
+2. 🛡️ **Finest-grained isolation** — Component-level MPU boundaries
 3. 📐 **Predictability** — Compile-time validation eliminates runtime unknowns
-4. 🔄 **Fault containment** — Component recovery without system reboot
-5. 🎪 **Simplicity** — Fewer moving parts = fewer failure modes
+4. 🔄 **Component recovery** — Jefe supervisor enables per-task restart
+5. 🎪 **Focused simplicity** — Designed specifically for infrastructure management
+6. ✅ **Production-proven** — Deployed and validated at Oxide Computer
+7. 🔒 **Security-audited** — Third-party validation completed
+
+**Each OS excels in its domain:**
+- **Tock:** Excellent for multi-app platforms with dynamic loading  
+- **Hubris:** Purpose-built for single-purpose, cannot-fail infrastructure
 
 ---
 
@@ -377,10 +417,12 @@ A: Commercial use allowed. Modified MPL files must remain MPL and be shared. Wor
 ## Questions?
 
 **Key Takeaways:**
-- ✅ Both OSes are excellent engineering
-- ✅ Different philosophies serve different needs
-- ✅ For PRoT: Static > Dynamic, Hardware > Software, Prevention > Recovery
-- ✅ Hubris architecture aligns with "cannot fail" requirements
+- ✅ Both OSes represent strong, production-proven engineering
+- ✅ Tock: Optimized for multi-app platforms (2017+)
+- ✅ Hubris: Optimized for infrastructure management (2021+)
+- ✅ Architecture match matters: static PRoT requirements → static OS design
+- ✅ For PRoT: Component-level recovery > Process-level recovery
+- ✅ Choice driven by requirements, not superiority
 
 **References available in full whitepaper**
 
@@ -526,18 +568,51 @@ Deterministic response times
 Critical operations never blocked
 ```
 
+**All tasks are preemptively scheduled:**
+- Crypto task can interrupt network task mid-operation
+- Real-time guarantees for security-critical operations
+- Deadlines enforceable through priority
+
+---
+
 **Tock Cooperative Scheduling:**
 ```
-Kernel:      ████████████████████
-Process A:   ──────██████────────
-Process B:   ────────────████────
+Kernel + Capsules: ████████████████████ (cooperative)
+Process A:         ──────██████──────── (preemptive)
+Process B:         ────────────████──── (preemptive)
 
-Tasks yield control
-Round-robin user processes
-Kernel must cooperate
+Capsules (kernel drivers) cooperatively scheduled
+User processes preemptively scheduled (round-robin)
 ```
 
-**For PRoT:** Crypto operations must preempt logging
+**Key architectural detail:**
+- **Capsules run at kernel level** - cooperatively scheduled
+- **Capsule must yield** for other capsules to run
+- **Long-running capsule** can delay other kernel operations
+- **User processes** are preemptively scheduled
+
+**Implications for PRoT:**
+
+**Scenario: Network capsule processing large packet**
+```
+Time →
+Network capsule:  ████████████████████ (processing, must yield)
+Crypto capsule:   ────────────────────█ (waiting for network to yield)
+```
+
+**Tock's approach:**
+- ✅ Works well when capsules are well-behaved
+- ✅ Simpler kernel implementation
+- ⚠️ Long-running operation can delay time-critical tasks
+- ⚠️ Relies on capsule developers to yield appropriately
+
+**Hubris's approach:**
+- ✅ High-priority task always runs when ready
+- ✅ No dependency on task cooperation
+- ✅ Deterministic worst-case response times
+- ✅ Critical for time-sensitive cryptographic operations
+
+**For PRoT:** Crypto attestation responses must be timely - preemptive scheduling ensures this even under load
 
 ---
 
@@ -593,4 +668,106 @@ Kernel must cooperate
    - OpenPRoT partners already working on it
 
 **Timeline estimate:** Weeks to months, not years
+
+---
+
+## A8: Hubris Driver Isolation Model
+
+### Drivers as User-Space Tasks
+
+**Traditional OS Model:**
+```
+┌────────────────────────────┐
+│  Kernel Space              │
+│  ├─ I2C driver (linked in) │
+│  ├─ UART driver            │
+│  └─ Ethernet driver        │
+└────────────────────────────┘
+All drivers share kernel privileges
+```
+
+**Hubris Model:**
+```
+┌────────────────────────────┐
+│ I2C Driver Task            │ ← MPU Region 1: Code/Data
+│ (MPU-isolated)             │   MPU Region 2: I2C MMIO
+└────────────────────────────┘
+
+┌────────────────────────────┐
+│ Ethernet Driver Task       │ ← MPU Region 3: Code/Data
+│ (MPU-isolated)             │   MPU Region 4: Ethernet MAC MMIO
+└────────────────────────────┘
+
+Each driver is isolated and has explicit peripheral access
+```
+
+### Hardware Access Control via MPU
+
+**Configuration in app.toml:**
+
+```toml
+[tasks.i2c_driver]
+memory = "16KB"
+peripherals = ["I2C1"]  # Maps to I2C1 MMIO region
+# MPU enforces: can ONLY access I2C1 registers
+
+[tasks.eth_driver]
+memory = "32KB"
+peripherals = ["EMAC"]  # Maps to Ethernet MAC MMIO region
+# MPU enforces: can ONLY access EMAC registers
+```
+
+**MPU Region Allocation:**
+- Drivers are just tasks (no kernel privileges)
+- Each peripheral consumes one MPU region
+- Sometimes adjacent peripherals can merge
+- Explicit, compile-time hardware permissions
+
+### Security Properties
+
+**Hardware isolation prevents:**
+- ❌ I2C driver misconfiguring SPI controller
+- ❌ Network driver disabling crypto hardware
+- ❌ Buggy UART driver corrupting system clocks
+- ❌ Compromised peripheral driver accessing other hardware
+
+**Example: I2C Driver Bug**
+```
+I2C driver tries to write to Ethernet MAC registers:
+  → MPU violation (hardware fault)
+  → Kernel notifies jefe
+  → Jefe restarts I2C driver
+  → Ethernet driver unaffected
+  → Other peripherals protected
+```
+
+### Region Usage Example
+
+**STM32H7 (8 MPU regions available):**
+```
+Region 0: Kernel code
+Region 1: Kernel data
+Region 2: Task A code/data
+Region 3: Task A peripheral (I2C1)
+Region 4: Task B code/data
+Region 5: Task B peripheral (SPI1)
+Region 6: Task C code/data
+Region 7: Task C peripheral (UART4)
+```
+
+### Why This Matters for PRoT
+
+**Platform Root of Trust requires:**
+- ✅ Crypto peripheral access restricted to crypto task only
+- ✅ Network driver cannot read crypto keys from hardware
+- ✅ Compromised peripheral driver contained
+- ✅ Clear audit trail of which task accesses what hardware
+
+**Hubris's user-space driver model provides:**
+- Hardware-enforced peripheral isolation
+- Compile-time hardware access validation
+- Runtime protection against hardware misconfiguration
+- Component-level fault recovery for driver failures
+
+**This is unique to Hubris** - most embedded OSes link drivers into kernel space with full hardware access
 
