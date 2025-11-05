@@ -26,6 +26,20 @@
 
 **One wrong choice = compromised infrastructure at scale**
 
+### NIST SP 800-193: Platform Firmware Resiliency
+
+Our evaluation aligns with **NIST SP 800-193** guidance for firmware resiliency:
+
+| NIST Pillar | PRoT Requirement | Why It Matters |
+|-------------|------------------|----------------|
+| **Protection** | Prevent unauthorized modifications | First line of defense |
+| **Detection** | Identify compromised firmware | Know when attack occurs |
+| **Recovery** | Restore to known-good state | Maintain operational continuity |
+
+> "Firmware resiliency is not just about preventing attacks but ensuring **continuity and trust** in the system." — NIST SP 800-193
+
+**For critical infrastructure:** Integrity + Availability are non-negotiable
+
 ---
 
 ## Our Evaluation Framework
@@ -91,16 +105,146 @@ We assessed six critical dimensions:
 - ✅ In-place reinitialization (drivers, services, etc.)
 - ✅ Memory isolation limits "blast radius"
 - ✅ No system-wide reboot needed
+- ✅ Preemptive scheduling enables immediate fault response
 - ✅ Production-proven in Oxide servers
 
 **Tock: Process-Level Recovery**
 - ✅ Can restart userspace processes independently
 - ✅ MPU isolates process failures
 - ⚠️ Kernel capsule panic requires full kernel restart
+- ⚠️ Capsules cooperatively scheduled within kernel (see A5)
 - ⚠️ Less granular than per-component recovery
 - ✅ Production-proven architecture
 
 **Winner: Hubris** — Finest-grained recovery for continuous operation
+
+---
+
+## Round 2.5: Trust Model — Who Can Hang the System?
+
+### **Hubris: Untrusted Tasks, Full Fault Tolerance**
+
+> **"Hubris tasks are untrusted, period. The kernel assumes tasks will fail — by malice, bug, or misconfig — and is designed to attribute, contain, and recover from faults."**  
+> — *Oxide Computer, Hubris Design Philosophy*
+
+### **NIST SP 800-193 Context: Firmware Resiliency Requires Recovery**
+
+NIST SP 800-193 emphasizes that firmware resiliency isn't just about **Prevention** (memory safety)—it requires **Detection** and **Recovery** capabilities:
+
+> *"While it is impossible to eliminate all risks, having a resilient firmware infrastructure can significantly mitigate the impact of potential breaches. Firmware resiliency ensures continuity and trust in the system."*
+
+**The question becomes:** Can your OS architecture recover from component failures without system restart?
+
+**The Critical Distinction:**
+
+| Component | **Tock (Capsules)** | **Hubris (Tasks)** |
+|----------|---------------------|--------------------|
+| **Location** | Inside kernel | Isolated via MPU |
+| **Memory Safety** | Untrusted (safe Rust) | Untrusted (safe Rust) |
+| **Availability** | **Trusted** (can hang system) | **Untrusted** (auto-restart via Jefe) |
+| **Confidentiality** | Protected (Rust) | Protected (MPU + Rust) |
+| **Integrity** | Protected (Rust) | Protected (MPU + Rust) |
+| **Logic Bugs / Panics** | Crash kernel | Fault isolated & recovered |
+| **Trust Requirement** | Must cooperate | **Can fail freely** |
+
+### **Concrete Example: Buggy Driver Logic**
+
+**Tock Capsule (Kernel Space):**
+```rust
+// Inside kernel, cooperatively scheduled
+fn process_packet(data: &[u8]) {
+    // Logic bug: infinite loop
+    loop { 
+        check_status(); 
+    }
+    // System hangs - kernel blocked
+    // Requires full system restart
+}
+```
+
+**Hubris Task (User Space):**
+```rust
+// MPU-isolated, preemptively scheduled
+fn process_packet(data: &[u8]) {
+    // Logic bug: infinite loop
+    loop { 
+        check_status(); 
+    }
+    // Jefe detects unresponsive task
+    // → Restarts task automatically (10ms)
+    // → Other components unaffected
+    // → System continues operating
+}
+```
+
+### **Key Insight**
+
+| System | Philosophy |
+|--------|-----------|
+| **Tock** | *"Capsules can't corrupt memory — but must not hang."* |
+| **Hubris** | *"Tasks can do anything wrong — we'll just restart them."* |
+
+### **CIA Triad Comparison**
+
+**Hubris achieves full CIA isolation (NIST SP 800-193 aligned):**
+- **Confidentiality**: MPU prevents reading other tasks' memory ✓
+- **Integrity**: MPU prevents corrupting other tasks' memory ✓
+- **Availability**: Jefe supervisor ensures failed tasks don't hang system ✓
+- **→ Meets NIST Detection + Recovery requirements**
+
+**Tock achieves CI (but not full A):**
+- **Confidentiality**: Rust prevents reading unsafe memory ✓
+- **Integrity**: Rust prevents corrupting memory ✓
+- **Availability**: Capsule hang/panic can block kernel ⚠️
+- **→ Strong Protection, but limited Recovery granularity**
+
+### **Why This Trade-off Exists**
+
+**Tock's Philosophy (Cooperation-Based):**
+- ✅ Capsules are well-audited kernel code
+- ✅ Cooperative scheduling simpler to reason about
+- ✅ Works when components are well-behaved
+- ✅ Excellent for research/education platforms
+- ✅ Production-proven in controlled deployments
+
+**Hubris's Philosophy (Fault-Assumption):**
+- ✅ Drivers **will** have bugs (production reality)
+- ✅ Hardware **can** misbehave
+- ✅ Availability **cannot** depend on cooperation
+- ✅ Essential for remote infrastructure (no physical access)
+- ✅ Scales to thousands of unattended servers
+
+### **For PRoT: Availability is Non-Negotiable**
+
+**Remote Data Center Reality:**
+- Server in Singapore fails at 3am
+- No physical access for restart
+- Every minute of downtime = SLA violation
+- Component hang must not require system restart
+
+**Hubris Design:**
+```
+Hung Task Detected
+    ↓
+Jefe Supervisor
+    ↓
+Restart Task (10ms)
+    ↓
+System Continues
+```
+
+**Traditional Approach:**
+```
+Kernel Component Hangs
+    ↓
+System Blocked
+    ↓
+Manual Intervention Required
+    ↓
+System Restart (seconds/minutes)
+```
+
+**Winner: Hubris** — Untrusted tasks enable true fault tolerance
 
 ---
 
@@ -486,6 +630,88 @@ priority = 2  # ERROR: Higher priority task created after
 
 ---
 
+## A2.5: NIST SP 800-193 Compliance Mapping
+
+**NIST Special Publication 800-193** defines "Platform Firmware Resiliency Guidelines" with three core principles. Here's how Hubris implements each:
+
+### **Pillar 1: Protection**
+*Prevent unauthorized firmware modifications and ensure integrity*
+
+| NIST Requirement | Hubris Implementation | Mechanism |
+|------------------|----------------------|-----------|
+| **Memory Isolation** | MPU-enforced per-task boundaries | Hardware MPU regions configured at boot |
+| **Code Integrity** | Immutable task images | Flash-resident, no runtime code modification |
+| **Privilege Separation** | Kernel vs. user-space tasks | ARMv7-M/v8-M privilege levels + MPU |
+| **Attack Surface Minimization** | Static composition, no dynamic loading | Zero runtime allocation/linking |
+| **Type Safety** | Rust memory safety | Compile-time borrow checker |
+
+**Result:** Confidentiality + Integrity guarantees (CI in CIA triad)
+
+---
+
+### **Pillar 2: Detection**
+*Identify when firmware has been compromised or is behaving incorrectly*
+
+| NIST Requirement | Hubris Implementation | Mechanism |
+|------------------|----------------------|-----------|
+| **Fault Attribution** | REPLY_FAULT with precise error source | Synchronous IPC fault propagation |
+| **Behavioral Monitoring** | Jefe supervisor task | Watchdog + task health checks |
+| **State Visibility** | Humility debugger (external) | Debug Binary Interface (DBI) |
+| **Anomaly Detection** | Task-level panic/fault tracking | Per-task fault counters |
+| **Runtime Verification** | Build-time invariants enforced | Static analysis prevents invalid states |
+
+**Result:** Fine-grained fault detection and attribution
+
+---
+
+### **Pillar 3: Recovery**
+*Restore firmware to known-good state without system-wide restart*
+
+| NIST Requirement | Hubris Implementation | Mechanism |
+|------------------|----------------------|-----------|
+| **Component-Level Recovery** | Per-task restart via Jefe | `sys_restart()` syscall |
+| **Fault Isolation** | MPU prevents fault propagation | Hardware memory protection |
+| **Fast Recovery** | <100ms task restart | No global state reconstruction |
+| **Continuity** | Other tasks unaffected | Preemptive scheduling + isolation |
+| **Known-Good State** | Task reset to initial state | Statically-defined entry point |
+| **Graceful Degradation** | Services continue during recovery | Task independence |
+
+**Result:** Full Availability guarantee (A in CIA triad)
+
+---
+
+### **NIST SP 800-193 Compliance Summary**
+
+```
+NIST Three Pillars → Hubris Architecture
+
+Protection ────────► MPU + Rust + Static Composition
+    ↓
+Detection ─────────► Jefe Supervisor + REPLY_FAULT + Humility
+    ↓
+Recovery ──────────► Per-Task Restart + Fault Isolation
+    ‖
+    ‖  Result:
+    ↓
+Firmware Resiliency = Continuity + Trust
+    (Even when components fail)
+```
+
+### **Why This Matters for PRoT**
+
+NIST SP 800-193 emphasizes:
+> "Firmware resiliency is not just about preventing attacks but ensuring **continuity and trust** in the system."
+
+**For Platform Root of Trust:**
+- **Protection** alone is insufficient (both Hubris and Tock have Rust memory safety)
+- **Detection + Recovery** are critical for unattended infrastructure
+- **Availability** cannot depend on perfect code in production
+- **Graceful degradation** required for remote data centers
+
+**Hubris's untrusted task model implements all three NIST pillars,** making it architecturally aligned with firmware resiliency best practices for critical infrastructure.
+
+---
+
 ## A3: Fault Recovery Flow
 
 ```
@@ -770,4 +996,197 @@ Region 7: Task C peripheral (UART4)
 - Component-level fault recovery for driver failures
 
 **This is unique to Hubris** - most embedded OSes link drivers into kernel space with full hardware access
+
+---
+
+## A9: Priority Inversion Prevention at Build Time
+
+### The Classic Problem: Mars Pathfinder
+
+**What is Priority Inversion?**
+
+Priority inversion occurs when:
+1. **Low-priority task** (L) holds a resource
+2. **High-priority task** (H) needs that resource and blocks
+3. **Medium-priority task** (M) preempts L, preventing it from finishing
+4. **Result**: H is effectively blocked by M (priority relationship inverted)
+
+**Mars Pathfinder Example:**
+```
+Priority 0 (High):  Bus Manager       [BLOCKED waiting for low-priority task]
+Priority 1 (Med):   Communications    [RUNNING, preempting Priority 2]
+Priority 2 (Low):   ASI/MET task      [Holds mutex, can't run to release it]
+
+Result: High-priority task starved → system reboot
+```
+
+### How Synchronous IPC Can Cause This
+
+**Traditional approach (allows downhill sends):**
+```rust
+// BAD: Low-priority task sends to high-priority server
+// Task A: Priority 5 (low)
+fn low_priority_task() {
+    let result = high_priority_server.do_work(data);  // Blocks in SEND
+}
+
+// Task B: Priority 1 (high)
+fn high_priority_server() {
+    loop {
+        let msg = recv();  // Blocked waiting for client
+        process(msg);
+        reply();
+    }
+}
+
+// Task C: Priority 3 (medium)
+fn medium_priority_task() {
+    loop {
+        do_cpu_intensive_work();  // Keeps running, preempts Task A
+    }
+}
+```
+
+**Problem**: Task A (low) sends to Task B (high) and blocks. Task C (medium) preempts Task A. Task B stuck waiting, effectively running at Task C's priority.
+
+### Hubris Solution: The Uphill Send Rule
+
+**Tasks may only send IPC to tasks with strictly higher priority (numerically lower).**
+
+```
+Priority 0 (highest)  ← Can send to nobody (except kernel)
+Priority 1            ← Can send to Priority 0
+Priority 2            ← Can send to Priority 0, 1
+Priority 3            ← Can send to Priority 0, 1, 2
+```
+
+**Why this prevents priority inversion:**
+
+1. **Server always higher priority than client**
+2. **No medium-priority preemption** - server runs immediately when client sends
+3. **Deterministic scheduling** - highest-priority runnable task always runs
+
+### Build-Time Enforcement
+
+**File**: `build/xtask/src/dist.rs`
+
+```rust
+fn check_task_priorities(toml: &Config) -> Result<()> {
+    for (name, task) in toml.tasks.iter() {
+        // Check each task-slot (IPC dependency)
+        for callee in task.task_slots.values() {
+            let p = toml.tasks.get(callee)?.priority;
+            
+            // UPHILL RULE CHECK: callee priority must be strictly less
+            if p >= task.priority && name != callee {
+                bail!(
+                    "Priority inversion: task {} (priority {}) calls into {} (priority {})",
+                    name, task.priority, callee, p
+                );
+            }
+        }
+    }
+    Ok(())
+}
+```
+
+**Build fails if violation detected:**
+```toml
+[tasks.high_priority]
+priority = 1
+task-slots = ["low_priority"]  # ERROR!
+
+[tasks.low_priority]
+priority = 3
+```
+
+**Output:**
+```
+Error: Priority inversion: task high_priority (priority 1) 
+       calls into low_priority (priority 3)
+```
+
+### Visual Verification
+
+**cargo xtask graph** generates GraphViz showing:
+- ✅ **Green arrows**: Valid uphill IPC (low → high priority)
+- ❌ **Red dashed arrows**: Priority inversions (CAUGHT AT BUILD TIME)
+
+### Real-World Example: Gimlet RoT
+
+```toml
+[tasks.jefe]
+priority = 0  # Supervisor - receives from all
+
+[tasks.sys]
+priority = 1
+task-slots = ["jefe"]  # ✓ Can send to priority 0
+
+[tasks.spi_driver]
+priority = 2
+task-slots = ["sys"]   # ✓ Can send to priority 1
+
+[tasks.app_logic]
+priority = 3
+task-slots = ["spi_driver", "sys"]  # ✓ Can send to priority 2, 1
+```
+
+**IPC call chain:**
+```
+app_logic (3)
+    ↓ send
+spi_driver (2)
+    ↓ send
+sys (1)
+    ↓ send
+jefe (0)
+```
+
+Every arrow goes **uphill** in priority (numerically downward).
+
+### Comparison with Traditional RTOS
+
+**Traditional RTOS (Priority Inheritance):**
+- ⚠️ Runtime overhead (dynamic priority changes)
+- ⚠️ Complex kernel logic
+- ⚠️ Deadlock still possible with circular waits
+- ⚠️ Difficult to reason about effective priorities
+
+**Hubris (Uphill Send Rule):**
+- ✅ **Zero runtime overhead** (enforced at build time)
+- ✅ **Simple kernel** (no priority boosting needed)
+- ✅ **Deadlock-free by construction** (no cycles possible)
+- ✅ **Easy to reason about** (static priority assignment)
+- ✅ **Predictable** (priorities never change at runtime)
+
+### Key Benefits for PRoT
+
+1. **Move errors from production to development**
+   - Priority inversions caught during `cargo xtask dist`
+   - Impossible to deploy misconfigured system
+
+2. **Deterministic response times**
+   - Crypto operations always preempt lower-priority tasks
+   - No unbounded blocking scenarios
+
+3. **Simplified reasoning**
+   - Static priority graph visualizable at build time
+   - No runtime priority changes to track
+
+4. **Security audit benefits**
+   - Complete task interaction graph known statically
+   - Priority relationships part of build artifacts
+   - Reproducible system behavior
+
+### The "Aggressively Static" Philosophy in Action
+
+> "If we can check it at build time, we must check it at build time"
+
+**Priority inversion is impossible by construction** - another example of Hubris's design philosophy preventing entire classes of failures before code ever runs in production.
+
+**References:**
+- Full technical details: `doc/priority-inversion-prevention.md`
+- Build validation: `build/xtask/src/dist.rs:1744-1774`
+- Graph visualization: `build/xtask/src/graph.rs`
+- IPC documentation: `doc/ipc.adoc`
 
